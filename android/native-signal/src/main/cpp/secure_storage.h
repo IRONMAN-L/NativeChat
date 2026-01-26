@@ -5,6 +5,7 @@
 #include <cstdint>
 
 namespace secure {
+    void setBasePath(const std::string& path);
 
     // Write raw bytes under a key
     bool write(const std::string& key, const std::vector<uint8_t>& data);

@@ -7,7 +7,7 @@ extern "C" {
 
 JNIEXPORT void JNICALL
 Java_com_potato_1chip_nativechat_signal_SignalModule_initialize(
-  JNIEnv*, jclass
+  JNIEnv* env, jclass, jstring path
 );
 
 // NEW: PreKey Bundle Processing

@@ -18,7 +18,7 @@ public class SignalModule {
     }
   }
 
-  public static native void initialize();
+  public static native void initialize(String path);
 
   public static native byte[] encrypt(
     String peerId,
@@ -43,9 +43,9 @@ public class SignalModule {
       byte[] identityKey
   );
 
-  // =====================================================
+  public static native String getRegistrationData();
+
   // Crypto helper methods called from C++ via JNI
-  // =====================================================
 
   private static final SecureRandom secureRandom = new SecureRandom();
 

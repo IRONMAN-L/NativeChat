@@ -16,7 +16,7 @@ static jclass gSignalModuleClass = nullptr;
 static bool ensureSignalModuleClass(JNIEnv* env) {
     if (gSignalModuleClass != nullptr) return true;
 
-    jclass local = env->FindClass("com/anonymous/mychat/signal/SignalModule");
+    jclass local = env->FindClass("com/potato_chip/nativechat/signal/SignalModule");
     if (!local) return false;
 
     gSignalModuleClass = (jclass)env->NewGlobalRef(local);

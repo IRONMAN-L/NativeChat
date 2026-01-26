@@ -4,13 +4,29 @@
 #include <vector>
 #include <cstdint>
 
+struct SignedPreKeyData {
+    uint32_t id;
+    std::vector<uint8_t> publicKey;
+    std::vector<uint8_t> signature;
+};
+
+struct PreKeyData {
+    uint32_t id;
+    std::vector<uint8_t> publicKey;
+};
+
 class SignalEngine {
 public:
     static SignalEngine& instance();
 
     void initialize();
 
-    // NEW: Needed to establish session with a new user
+    std::vector<uint8_t> getIdentityKeyPublic();
+    uint32_t getLocalRegistrationId();
+    SignedPreKeyData getSignedPreKeyData();
+    std::vector<PreKeyData> getOneTimePreKeys();
+    
+    // Needed to establish session with a new user
     bool processPreKeyBundle(
         const std::string& peerId,
         uint32_t registrationId,

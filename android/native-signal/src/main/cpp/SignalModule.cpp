@@ -4,7 +4,7 @@
 #include "jni_helper.h"
 #include "SignalModule.h"
 #include "signal_engine.h"
-
+#include "secure_storage.h"
 static JavaVM* gJvm = nullptr;
 
 JavaVM* getJavaVM() {
@@ -32,14 +32,99 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
     return JNI_VERSION_1_6;
 }
 
+
+// Simple Base64 Encoder
+static const std::string base64_chars = 
+             "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+             "abcdefghijklmnopqrstuvwxyz"
+             "0123456789+/";
+
+std::string base64_encode(const std::vector<uint8_t>& buf) {
+    std::string ret;
+    int i = 0, j = 0;
+    unsigned char char_array_3[3], char_array_4[4];
+
+    for (auto byte : buf) {
+        char_array_3[i++] = byte;
+        if (i == 3) {
+            char_array_4[0] = (char_array_3[0] & 0xfc) >> 2;
+            char_array_4[1] = ((char_array_3[0] & 0x03) << 4) + ((char_array_3[1] & 0xf0) >> 4);
+            char_array_4[2] = ((char_array_3[1] & 0x0f) << 2) + ((char_array_3[2] & 0xc0) >> 6);
+            char_array_4[3] = char_array_3[2] & 0x3f;
+            for(i = 0; (i <4) ; i++) ret += base64_chars[char_array_4[i]];
+            i = 0;
+        }
+    }
+    if (i) {
+        for(j = i; j < 3; j++) char_array_3[j] = '\0';
+        char_array_4[0] = (char_array_3[0] & 0xfc) >> 2;
+        char_array_4[1] = ((char_array_3[0] & 0x03) << 4) + ((char_array_3[1] & 0xf0) >> 4);
+        char_array_4[2] = ((char_array_3[1] & 0x0f) << 2) + ((char_array_3[2] & 0xc0) >> 6);
+        char_array_4[3] = char_array_3[2] & 0x3f;
+        for (j = 0; (j < i + 1); j++) ret += base64_chars[char_array_4[j]];
+        while((i++ < 3)) ret += '=';
+    }
+    return ret;
+}
+
 extern "C" {
 
 JNIEXPORT void JNICALL
 Java_com_potato_1chip_nativechat_signal_SignalModule_initialize(
-    JNIEnv*,
-    jclass   // ✅ static method → jclass
+    JNIEnv* env,
+    jclass,   // ✅ static method → jclass
+    jstring path
 ) {
+    const char* pathChars = env->GetStringUTFChars(path, nullptr);
+    std::string storagePath(pathChars);
+    env->ReleaseStringUTFChars(path, pathChars);
+
+    secure::setBasePath(storagePath);
+    
     SignalEngine::instance().initialize();
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_potato_1chip_nativechat_signal_SignalModule_getRegistrationData(
+    JNIEnv* env,
+    jclass
+) {
+    try {
+        auto& engine = SignalEngine::instance();
+        
+        auto identity = engine.getIdentityKeyPublic();
+        auto regId = engine.getLocalRegistrationId();
+        auto spk = engine.getSignedPreKeyData();
+        // 1. Fetch PreKeys
+        auto preKeys = engine.getOneTimePreKeys();
+
+        // 2. Build JSON
+        std::string json = "{";
+        json += "\"registrationId\": " + std::to_string(regId) + ",";
+        json += "\"identityKey\": \"" + base64_encode(identity) + "\",";
+        json += "\"signedPreKey\": {";
+        json +=    "\"keyId\": " + std::to_string(spk.id) + ",";
+        json +=    "\"publicKey\": \"" + base64_encode(spk.publicKey) + "\",";
+        json +=    "\"signature\": \"" + base64_encode(spk.signature) + "\"";
+        json += "},";
+        
+        // 3. Add PreKeys Array
+        json += "\"preKeys\": [";
+        for (size_t i = 0; i < preKeys.size(); i++) {
+            json += "{";
+            json += "\"keyId\": " + std::to_string(preKeys[i].id) + ",";
+            json += "\"publicKey\": \"" + base64_encode(preKeys[i].publicKey) + "\"";
+            json += "}";
+            if (i < preKeys.size() - 1) json += ",";
+        }
+        json += "]";
+        
+        json += "}";
+
+        return env->NewStringUTF(json.c_str());
+    } catch (...) {
+        return env->NewStringUTF("{}");
+    }
 }
 
 JNIEXPORT jbyteArray JNICALL

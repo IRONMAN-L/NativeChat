@@ -21,13 +21,23 @@ public class SignalNativeModule extends ReactContextBaseJavaModule {
   @ReactMethod
   public void initialize(Promise promise) {
     try {
-      SignalModule.initialize();
+      String path = getReactApplicationContext().getFilesDir().getAbsolutePath();
+      SignalModule.initialize(path);
       promise.resolve("Signal Test: Module is ready");
     } catch (Exception e) {
       promise.reject("INIT_FAILED", e);
     }
   }
 
+  @ReactMethod
+  public void getRegistrationData(Promise promise) {
+    try {
+      String json = SignalModule.getRegistrationData();
+      promise.resolve(json);
+    } catch (Exception e) {
+        promise.reject("ERR_GET_KEYS", e);
+    }
+  }
 
   @ReactMethod
   public void encrypt(String peerId, String plaintextBase64, Promise promise) {

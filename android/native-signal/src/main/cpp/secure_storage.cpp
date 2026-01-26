@@ -6,8 +6,17 @@
 
 namespace secure {
 
+    static std::string g_basePath = "";
+
+    // 2. Add a function to set it
+    void setBasePath(const std::string& path) {
+        g_basePath = path;
+    }
+
     static std::string pathFor(const std::string& key) {
-        return ".secure_" + key;
+        // 3. Prepend the base path
+        if (g_basePath.empty()) return ".secure_" + key; // Fallback
+        return g_basePath + "/.secure_" + key;
     }
 
     bool write(const std::string& key, const std::vector<uint8_t>& data) {
