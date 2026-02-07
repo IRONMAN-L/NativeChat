@@ -45,6 +45,8 @@ public class SignalModule {
 
   public static native String getRegistrationData();
 
+  public static native boolean sessionExists(String peerId);
+  
   // Crypto helper methods called from C++ via JNI
 
   private static final SecureRandom secureRandom = new SecureRandom();

@@ -1,25 +1,22 @@
-import { TextInput, View, TouchableOpacity, Alert, Platform, Image } from "react-native";
-import { useState } from "react";
 import { MaterialIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import { useState } from "react";
+import { Alert, Image, ScrollView, TextInput, TouchableOpacity, View } from "react-native";
 import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 type Props = {
     keyboardHeight: { value: number };
     setInputHeight?: (h: number) => void;
-    onSend?: () => void;
+    onSend: (inputText: string, images: string[]) => Promise<void>;
     bottomInset: number;
 }
 
 export default function MessageInput({ keyboardHeight, setInputHeight, onSend, bottomInset }: Props) {
-
-
     const [message, setMessage] = useState<string>('');
-    const [image, setImage] = useState<string | null>(null);
-    const handleSend = () => {
-        console.log(message);
-        onSend?.();
-        setMessage("");
-        setImage(null);
+    const [images, setImages] = useState<string[]>([]);
+    const handleSend = async () => {
+        await onSend(message, images);
+        setMessage('');
+        setImages([]);
     }
     // keyboard go up
     const animatedStyle = useAnimatedStyle(() => {
@@ -41,14 +38,17 @@ export default function MessageInput({ keyboardHeight, setInputHeight, onSend, b
 
         let result = await ImagePicker.launchImageLibraryAsync({
             mediaTypes: ['images', 'videos'],
-            allowsEditing: Platform.OS === 'ios' ? true : false,
+            allowsEditing: true,
             aspect: [4, 3],
             quality: 1,
-            allowsMultipleSelection: false,
+            allowsMultipleSelection: images.length > 1 ? false : true,
+            selectionLimit: 5
         });
 
         if (!result.canceled) {
-            setImage(result.assets[0].uri);
+            // Append images
+            const newUris = result.assets.map(a => a.uri);
+            setImages(prev => [...prev, ...newUris]);
         }
     }
 
@@ -64,6 +64,14 @@ export default function MessageInput({ keyboardHeight, setInputHeight, onSend, b
             mediaTypes: ['videos', 'images'],
         });
 
+        if (!result.canceled) {
+            setImages(prev => [...prev, result.assets[0].uri])
+        }
+
+    }
+
+    const removeImage = (indexToRemove: number) => {
+        setImages(prev => prev.filter((_, index) => index !== indexToRemove));
     }
 
     return (
@@ -86,14 +94,23 @@ export default function MessageInput({ keyboardHeight, setInputHeight, onSend, b
             ]}
             onLayout={(e) => setInputHeight?.(e.nativeEvent.layout.height)}
         >
-            {image ? (
-                <View className="w-32 h-32">
-                    <Image source={{ uri: image }} className='w-full h-full rounded-xl' />
-                    <TouchableOpacity className="absolute top-1 right-1 bg-gray-200 w-7 h-7 rounded-full justify-center" onPress={() => setImage(null)}>
-                        <MaterialIcons name="close" size={24} color="dimgray" />
-                    </TouchableOpacity>
+            {images.length > 0 && (
+                <View className="h-32 w-full">
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10 }}>
+                        {images.map((uri, index) => (
+                            <View key={index} className="w-24 h-24 relative">
+                                <Image source={{ uri }} className='w-full h-full rounded-xl' />
+                                <TouchableOpacity
+                                    className="absolute -top-2 -right-2 bg-gray-200 w-6 h-6 rounded-full justify-center items-center z-10"
+                                    onPress={() => removeImage(index)}
+                                >
+                                    <MaterialIcons name="close" size={16} color="dimgray" />
+                                </TouchableOpacity>
+                            </View>
+                        ))}
+                    </ScrollView>
                 </View>
-            ) : null}
+            )}
             <View className="flex-1 flex-row items-center gap-5">
                 <TouchableOpacity className='rounded-full p-2'>
                     <MaterialIcons name="emoji-emotions" size={24} color="gray" />
@@ -114,8 +131,8 @@ export default function MessageInput({ keyboardHeight, setInputHeight, onSend, b
                 <TouchableOpacity onPress={openCamera}>
                     <MaterialIcons name="camera-alt" size={24} color="black" />
                 </TouchableOpacity>
-                <TouchableOpacity onPress={handleSend} disabled={!message && !image}>
-                    <MaterialIcons name={`${(message || image) ? "send" : "mic"}`} size={24} color="white" className="p-2 bg-[#0e9484] rounded-full" />
+                <TouchableOpacity onPress={handleSend} disabled={!message && !images}>
+                    <MaterialIcons name={`${(message.trim() || images) ? "send" : "mic"}`} size={24} color="white" className="p-2 bg-[#0e9484] rounded-full" />
                 </TouchableOpacity>
             </View>
         </Animated.View>

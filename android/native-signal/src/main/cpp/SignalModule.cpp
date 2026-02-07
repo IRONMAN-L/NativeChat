@@ -127,6 +127,17 @@ Java_com_potato_1chip_nativechat_signal_SignalModule_getRegistrationData(
     }
 }
 
+JNIEXPORT jboolean JNICALL
+Java_com_potato_1chip_nativechat_signal_SignalModule_sessionExists(
+  JNIEnv* env, jclass,
+  jstring peerId
+) {
+    const char* peerChars = env->GetStringUTFChars(peerId, nullptr);
+    std::string peer(peerChars);
+    env->ReleaseStringUTFChars(peerId, peerChars);
+    return SignalEngine::instance().sessionExists(peer);
+}
+
 JNIEXPORT jbyteArray JNICALL
 Java_com_potato_1chip_nativechat_signal_SignalModule_encrypt(
     JNIEnv* env,

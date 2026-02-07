@@ -47,6 +47,8 @@ uint32_t signal_message_get_counter(const signal_message *message);
 
 signal_buffer *signal_message_get_body(const signal_message *message);
 
+int signal_message_serialize(signal_buffer **buffer, const signal_message *message);
+int pre_key_signal_message_serialize(signal_buffer **buffer, const pre_key_signal_message *message);
 /**
  * Verify the MAC on the Signal message.
  *

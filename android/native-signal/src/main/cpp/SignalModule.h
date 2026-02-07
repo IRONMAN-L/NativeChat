@@ -39,6 +39,17 @@ Java_com_potato_1chip_nativechat_signal_SignalModule_decrypt(
   jbyteArray ciphertext
 );
 
+JNIEXPORT jboolean JNICALL
+Java_com_potato_1chip_nativechat_signal_SignalModule_sessionExists(
+  JNIEnv*, jclass,
+  jstring peerId
+);
+
+JNIEXPORT jstring JNICALL
+Java_com_potato_1chip_nativechat_signal_SignalModule_getRegistrationData(
+  JNIEnv*, jclass
+);
+
 #ifdef __cplusplus
 }
 #endif

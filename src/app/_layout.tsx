@@ -1,16 +1,19 @@
 import { ClerkProvider, useAuth } from '@clerk/clerk-expo';
-import { Stack } from 'expo-router';
+import { Stack, router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import '../../global.css';
 // import { tokenCache } from '@clerk/clerk-expo/token-cache'
+import { usePushNotifications } from '@/hooks/usePushNotifications';
 import { signal } from '@/native/signal';
 import SupabaseProvider, { useSupabase } from '@/providers/SupabaseProvider';
+import { registerBackgroundNotificationTask } from '@/services/backgroundNotificationTask';
+import { sendBackgroundTextMessage } from '@/services/chatService';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import * as Notifications from 'expo-notifications';
 import * as SecureStore from 'expo-secure-store';
 import { useEffect, } from 'react';
 import { ActivityIndicator, Text, View } from 'react-native';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
-
 // TanStack query
 const queryClient = new QueryClient();
 
@@ -38,19 +41,27 @@ if (!publishableKey) {
 
 
 function RootStack() {
-    const { isSignedIn, isLoaded, userId } = useAuth();
+    const { isSignedIn, isLoaded, userId: myId } = useAuth();
     const { supabase, isSupabaseReady } = useSupabase();
+    const { expoPushToken } = usePushNotifications();
+
+    useEffect(() => {
+        if (expoPushToken) {
+            registerBackgroundNotificationTask();
+        }
+    }, [expoPushToken]);
+
     useEffect(() => {
         async function setupSignal() {
-            if (isSignedIn && userId && isSupabaseReady) {
-                const success = await signal.registerDeviceOnServer(userId, supabase);
+            if (isSignedIn && myId && isSupabaseReady) {
+                const success = await signal.registerDeviceOnServer(myId, supabase);
                 if (success) {
-                    console.log('Signal protocol is READY for user:', userId);
+                    console.log('Signal protocol is READY for user:', myId);
                 }
             }
         }
         setupSignal();
-    }, [isSignedIn, userId, isSupabaseReady]);
+    }, [isSignedIn, myId, isSupabaseReady]);
 
     if (!isLoaded) {
         return (
@@ -60,6 +71,50 @@ function RootStack() {
             </View>
         );
     }
+
+    useEffect(() => {
+        if (!myId || !supabase) return;
+        const responseListener = Notifications.addNotificationResponseReceivedListener(async (response) => {
+            const actionId = response.actionIdentifier;
+            const userText = response.userText; // The text they typed!
+            const data = response.notification.request.content.data;
+            const channelId = data.channelId as string;
+            // 1. Handle "Reply"
+            if (actionId === 'reply' && userText && channelId) {
+                console.log(`User replied: ${userText} to channel ${channelId}`);
+
+                // TODO: Call your send message logic here
+                // Note: To do this purely in the background requires "Background Tasks"
+                // For now, it's easier to set opensAppToForeground: true in Step 1
+                const { data: channelUser } = await supabase
+                    .from('channel_users')
+                    .select('user_id')
+                    .eq('channel_id', channelId)
+                    .neq('user_id', myId) // not me
+                    .single();
+                if (channelUser) {
+                    await sendBackgroundTextMessage(supabase, channelId, myId, channelUser.user_id, userText)
+                    router.push(`/chat/${channelId}`)
+                }
+            }
+
+            // 2. Handle "Mark as Read"
+            if (actionId === 'mark_read' && channelId) {
+                console.log("Marking as read...");
+                // Call Supabase to update status
+                const { data: unread } = await supabase.from('messages')
+                    .select('id, message_recipients!inner(*)')
+                    .eq('channel_id', channelId)
+                    .eq('message_recipients.recipient_user_id', myId)
+                    .neq('message_recipients.status', 'read')
+
+            }
+        });
+
+        return () => {
+            responseListener.remove();
+        };
+    }, [myId, supabase]);
 
     return (
         <Stack screenOptions={{ headerShown: false }}>

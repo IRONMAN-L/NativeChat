@@ -1,15 +1,15 @@
-import { ActivityIndicator, FlatList, Alert, Text } from 'react-native';
-import UserListItem from './UserListItem';
 import { useSupabase } from '@/providers/SupabaseProvider';
-import { useUser } from '@clerk/clerk-expo';
 import { User } from '@/types/index';
+import { useUser } from '@clerk/clerk-expo';
 import { useQuery } from '@tanstack/react-query';
+import { ActivityIndicator, FlatList, Text } from 'react-native';
+import UserListItem from './UserListItem';
 
 type UserListProps = {
   onPress?: (user: User) => void;
 }
 export default function UserList({ onPress }: UserListProps) {
-  const { supabase, isReady} = useSupabase();
+  const { supabase, isSupabaseReady } = useSupabase();
   const { user } = useUser();
 
   // tanstack cache
@@ -17,10 +17,10 @@ export default function UserList({ onPress }: UserListProps) {
     queryKey: ['users'],
     queryFn: async () => {
       const { data: users } = await supabase.from('users').select('*').neq('id', user!.id).throwOnError();
-      
+
       return users;
     },
-    enabled:isReady,
+    enabled: isSupabaseReady,
   });
 
   if (isLoading) {

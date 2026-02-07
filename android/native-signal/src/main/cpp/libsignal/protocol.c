@@ -59,7 +59,7 @@ struct sender_key_distribution_message
     ec_public_key *signature_key;
 };
 
-static int signal_message_serialize(signal_buffer **buffer, const signal_message *message);
+int signal_message_serialize(signal_buffer **buffer, const signal_message *message);
 static int signal_message_get_mac(signal_buffer **buffer,
         uint8_t message_version,
         ec_public_key *sender_identity_key,
@@ -68,7 +68,7 @@ static int signal_message_get_mac(signal_buffer **buffer,
         const uint8_t *serialized, size_t serialized_len,
         signal_context *global_context);
 
-static int pre_key_signal_message_serialize(signal_buffer **buffer, const pre_key_signal_message *message);
+int pre_key_signal_message_serialize(signal_buffer **buffer, const pre_key_signal_message *message);
 
 static int sender_key_message_serialize(signal_buffer **buffer, const sender_key_message *message, ec_private_key *signature_key, signal_context *global_context);
 static int sender_key_distribution_message_serialize(signal_buffer **buffer, const sender_key_distribution_message *message);
@@ -172,7 +172,7 @@ complete:
     return result;
 }
 
-static int signal_message_serialize(signal_buffer **buffer, const signal_message *message)
+int signal_message_serialize(signal_buffer **buffer, const signal_message *message)
 {
     int result = 0;
     size_t result_size = 0;
@@ -591,7 +591,7 @@ int pre_key_signal_message_create(pre_key_signal_message **pre_key_message,
     return result;
 }
 
-static int pre_key_signal_message_serialize(signal_buffer **buffer, const pre_key_signal_message *message)
+int pre_key_signal_message_serialize(signal_buffer **buffer, const pre_key_signal_message *message)
 {
     int result = 0;
     size_t result_size = 0;

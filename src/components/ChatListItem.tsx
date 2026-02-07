@@ -1,29 +1,35 @@
-import { View, Text, Image, TouchableOpacity, } from 'react-native'
-import { router } from 'expo-router';
-import { ChannelWithUsers } from '@/types'
-import { formatDistanceToNow } from 'date-fns';
+import { LocalChannel } from '@/store/channelListStore';
 import { useUser } from '@clerk/clerk-expo';
+import { formatDistanceToNow } from 'date-fns';
+import { router } from 'expo-router';
+import { Image, Text, TouchableOpacity, View } from 'react-native';
+
 
 type ChannelListItemProps = {
-  channel: ChannelWithUsers
+  channel: LocalChannel
 }
 export default function ChatListItem({ channel }: ChannelListItemProps) {
+
   const { user } = useUser();
   let channelName = channel.name || '';
   let channelAvatar = channel.avatar;
+  let otherUser = null;
   if (channel.type === 'direct') {
-    const otherUser = channel.users.find(u => u.id !== user!.id);
-    channelName = otherUser?.full_name || 'Unknown';
+    otherUser = channel.users.find(u => u.id !== user!.id);
+    channelName = otherUser?.first_name || 'Unknown';
     channelAvatar = otherUser?.avatar_url || null;
   }
+
+
   return (
     <TouchableOpacity
-      onPress={() => {
+      onPress={async () => {
         router.push({
-          pathname: `/chat/${channel.id}`,
-          params: { name: channelName }
+          pathname: '/chat/[id]',
+          params: { name: channelName, id: channel.id }
         })
-      }}>
+      }}
+    >
       <View className="flex-row gap-4 p-4 border-b border-gray-200">
         {channelAvatar ? (
           <Image source={{ uri: channelAvatar }} className='w-12 h-12 rounded-full bg-neutral-200' />

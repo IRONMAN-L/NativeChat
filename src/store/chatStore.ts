@@ -1,0 +1,43 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+export type LocalMessage = {
+    id: string; // UUID
+    text: string;
+    imageUri: string | null;
+    securePayload?: string;
+    senderId: string;
+    senderName: string;
+    createdAt: string;
+    isMe: boolean;
+    status: 'sending' | 'sent' | 'delivered' | 'read';
+};
+
+const getStorageKey = (channelId: string) => `chat_messages_${channelId}`;
+
+export const chatStore = {
+    // Load messages from disk (FAST)
+    async loadMessages(channelId: string): Promise<LocalMessage[]> {
+        const json = await AsyncStorage.getItem(getStorageKey(channelId));
+        return json ? JSON.parse(json) : [];
+    },
+
+    // Save a new message (Append)
+    async addMessage(channelId: string, msg: LocalMessage) {
+        const current = await this.loadMessages(channelId);
+
+        // Avoid duplicates
+        if (current.find(m => m.id === msg.id)) return;
+
+        const updated = [...current, msg];
+        await AsyncStorage.setItem(getStorageKey(channelId), JSON.stringify(updated));
+        return updated;
+    },
+
+    // Update status (e.g., sending -> sent)
+    async updateMessage(channelId: string, msgId: string, msg: LocalMessage) {
+        const current = await this.loadMessages(channelId);
+        const updated = current.map(m => m.id === msgId ? { ...msg } : m);
+        await AsyncStorage.setItem(getStorageKey(channelId), JSON.stringify(updated));
+        return updated;
+    }
+};

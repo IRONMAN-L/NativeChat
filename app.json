@@ -4,7 +4,7 @@
     "slug": "nativechat",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/nativechat.jpg",
+    "icon": "./assets/images/icon.png",
     "scheme": "nativechat",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -20,7 +20,12 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.potato_chip.nativechat"
+      "package": "com.potato_chip.nativechat",
+      "useNextNotificationsApi": true,
+      "permissions": [
+        "RECEIVE_BOOT_COMPLETED",
+        "WAKE_LOCK"
+      ]
     },
     "web": {
       "output": "static",
@@ -28,7 +33,7 @@
     },
     "plugins": [
       "expo-router",
-      [ 
+      [
         "expo-build-properties",
         {
           "android": {
@@ -50,7 +55,8 @@
           }
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-notifications"
     ],
     "experiments": {
       "typedRoutes": true,
@@ -59,9 +65,9 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "2833ce5a-9deb-4507-b020-64a43f56ed92"
+        "projectId": "61e302b0-5c79-40e3-93b1-cb93dfa894f2"
       }
     },
-    "owner": "project-n-org"
+    "owner": "mortal-combats-org"
   }
 }

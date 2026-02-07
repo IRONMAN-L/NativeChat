@@ -1,8 +1,10 @@
 import { Database } from '@/types/database.types';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SupabaseClient } from '@supabase/supabase-js';
+import { Buffer } from 'buffer';
+import { documentDirectory, EncodingType, makeDirectoryAsync, readAsStringAsync, writeAsStringAsync } from 'expo-file-system/legacy';
+import * as MediaLibrary from 'expo-media-library';
 import { NativeModules } from 'react-native';
-
 const { SignalModule } = NativeModules;
 
 type ClaimedKey = {
@@ -21,8 +23,37 @@ export const signal = {
         console.log(res);
     },
 
-    async encrypt() { }, // TODO
-    async decrypt() { }, // TODO
+    async encrypt(recipientUserId: string, message: string) {
+        try {
+            // 1. Convert string to Base64 (Signal Native expects Base64 input)
+            const plaintextBase64 = Buffer.from(message, 'utf8').toString('base64');
+
+            console.log(`🔒 Encrypting for ${recipientUserId}: "${message}"`);
+
+            // 2. Call Native Module
+            // The result will be a JSON string containing { type: 3, body: "..." }
+            const ciphertext = await SignalModule.encrypt(recipientUserId, plaintextBase64);
+
+            console.log("📦 Ciphertext received:", ciphertext.substring(0, 20) + "...");
+            return ciphertext;
+        } catch (error) {
+            console.error("Encryption Failed:", error);
+            throw error;
+        }
+    }, // TODO
+    async decrypt(senderUserId: string, ciphertext: string) {
+        try {
+            const plaintextBase64 = await SignalModule.decrypt(senderUserId, ciphertext);
+
+            // convert Base64 -> UTF-8 string
+            const plaintext = Buffer.from(plaintextBase64, 'base64').toString('utf8');
+            console.log("Decrypted: ", plaintext);
+            return plaintext;
+        } catch (err) {
+            console.error(`Decryption Failed for ${senderUserId}:`, err);
+            return null;
+        }
+    }, // TODO
 
 
     async establishSession(recipientUserId: string, supabase: SupabaseClient<Database>) {
@@ -30,6 +61,12 @@ export const signal = {
             console.log(`🔗 Establishing session with ${recipientUserId}...`);
             await this.initialize();
 
+            // Check if session already exists
+            const exists = await SignalModule.sessionExists(recipientUserId);
+            if (exists) {
+                console.log('Session already Exists. Skipping Handshake');
+                return true;
+            }
             // 1. Get Recipient's Device Info (Identity & Signed PreKey)
             const { data: device, error: deviceError } = await supabase
                 .from('signal_devices')
@@ -58,12 +95,29 @@ export const signal = {
             }
 
 
-            // 3. Process the Bundle in Native C++
+            // 3. Process the PreKeyBundle in Native C++
             // The peerId is usually "userId:deviceId" 
             const peerAddress = `${recipientUserId}:1`;
 
+            console.log("🔍 --- PRE-FLIGHT CHECK ---");
+            console.log(`Target: ${peerAddress}`);
+            console.log(`Registration ID: ${device.registration_id} (Type: ${typeof device.registration_id})`);
+
+            // 1. Check Identity Key (Should be ~44 chars, starting with 'B' or 'A')
+            console.log(`Identity Key: ${device.identity_key} (Len: ${device.identity_key.length})`);
+
+            // 2. Check Signed PreKey
+            console.log(`Signed PreKey ID: ${device.signed_prekey_id}`);
+            console.log(`Signed PreKey: ${device.signed_prekey} (Len: ${device.signed_prekey.length})`);
+            console.log(`Signature: ${device.signed_prekey_signature} (Len: ${device.signed_prekey_signature.length})`);
+
+            // 3. Check One-Time PreKey
+            console.log(`PreKey ID: ${preKeyData?.prekey_id}`);
+            console.log(`PreKey: ${preKeyData?.prekey} (Len: ${preKeyData?.prekey?.length})`);
+            console.log("---------------------------");
+
             const success = await SignalModule.processPreKeyBundle(
-                peerAddress,           // peerId (Internal Address)
+                recipientUserId,           // peerId (Internal Address)
                 device.registration_id,
                 1,                     // deviceId
                 preKeyData?.prekey_id ?? 0,// preKeyId (0 if none)
@@ -161,6 +215,64 @@ export const signal = {
             console.error("Signal Registration Error:", error);
             return false;
         }
-    }
+    },
+
+    async encryptImage(imageUri: string) {
+        try {
+            // 1. Read file as Base64 
+            // (You'll need expo-file-system for this)
+            const base64Data = await readAsStringAsync(imageUri, { encoding: EncodingType.Base64 })
+
+            // 2. Encrypt using Native AES (Fast)
+            // Returns: { ciphertext: "...", key: "...", iv: "..." }
+            const result = await SignalModule.encryptFile(base64Data);
+            console.log("✅ Image Encrypted");
+            return result;
+        } catch (e) {
+            console.error("Image Encryption Failed:", e);
+            throw e;
+        }
+    },
+
+    async decryptImage(ciphertextBase64: string, keyBase64: string, ivBase64: string) {
+        try {
+            console.log("🔓 Decrypting image...");
+
+            // 1. Decrypt using Native AES (C++/Java)
+            // Returns the raw Base64 string of the image
+            const plaintextBase64 = await SignalModule.decryptFile(ciphertextBase64, keyBase64, ivBase64);
+
+            // 2. Save to a persistent folder structure (similar to WhatsApp)
+            const mediaDir = `${documentDirectory}Media/Nativechat Images/`;
+            await makeDirectoryAsync(mediaDir, { intermediates: true });
+
+            const filename = `IMG-${Date.now()}.jpg`;
+            const path = `${mediaDir}${filename}`;
+
+            // 3. Write decrypted data to the persistent path
+            await writeAsStringAsync(path, plaintextBase64, { encoding: EncodingType.Base64 });
+
+            // 4. Register with MediaLibrary to show in Gallery
+            const { status } = await MediaLibrary.requestPermissionsAsync();
+            if (status === 'granted') {
+                const asset = await MediaLibrary.createAssetAsync(path);
+                const album = await MediaLibrary.getAlbumAsync('Nativechat');
+
+                if (album == null) {
+                    await MediaLibrary.createAlbumAsync('Nativechat', asset, false);
+                } else {
+                    await MediaLibrary.addAssetsToAlbumAsync([asset], album, false);
+                }
+                console.log("🖼️ Image saved to Gallery album");
+            }
+
+            console.log("✅ Image saved to:", path);
+            return path;
+
+        } catch (e) {
+            console.error("Image Decryption Failed:", e);
+            return null;
+        }
+    },
 
 }

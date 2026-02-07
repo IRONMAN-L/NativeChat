@@ -39,6 +39,9 @@ public:
         const std::vector<uint8_t>& identityKey
     );
 
+
+    bool sessionExists(const std::string& peerId);
+
     std::vector<uint8_t> encrypt(
         const std::string& peerId,
         const std::vector<uint8_t>& plaintext

@@ -9,6 +9,11 @@ public:
     // Expose callbacks to libsignal
     signal_protocol_session_store* callbacks();
 
+    static int contains_session(
+        const signal_protocol_address* address,
+        void* user_data
+    );
+
 private:
     // ===== libsignal callbacks =====
 
@@ -28,11 +33,7 @@ private:
         void* user_data
     );
 
-    static int contains_session(
-        const signal_protocol_address* address,
-        void* user_data
-    );
-
+    
     static int delete_session(
         const signal_protocol_address* address,
         void* user_data

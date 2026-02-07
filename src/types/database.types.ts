@@ -230,6 +230,7 @@ export type Database = {
           avatar_url: string | null
           created_at: string
           email_address: string | null
+          expo_push_token: string | null
           first_name: string | null
           full_name: string | null
           id: string
@@ -240,6 +241,7 @@ export type Database = {
           avatar_url?: string | null
           created_at?: string
           email_address?: string | null
+          expo_push_token?: string | null
           first_name?: string | null
           full_name?: string | null
           id: string
@@ -250,6 +252,7 @@ export type Database = {
           avatar_url?: string | null
           created_at?: string
           email_address?: string | null
+          expo_push_token?: string | null
           first_name?: string | null
           full_name?: string | null
           id?: string

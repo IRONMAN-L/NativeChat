@@ -9,6 +9,12 @@
 #include <session_builder.h> 
 #include <protocol.h>
 #include "signal_crypto_provider.h"
+#include <android/log.h>
+#define LOG_TAG "SignalEngine"
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
+
+
 extern signal_crypto_provider g_crypto_provider;
 
 static SignalProtocolStore g_store;
@@ -137,7 +143,12 @@ bool SignalEngine::processPreKeyBundle(
     const std::vector<uint8_t>& signature,
     const std::vector<uint8_t>& identityKey
 ) {
-    if (!g_initialized) return false;
+    LOGI("Processing Bundle for %s", peerId.c_str());
+    LOGI("Inputs: PreKeyID=%u, PreKeyBytes=%zu", preKeyId, preKeyPublic.size());
+    if (!g_initialized) {
+        LOGE("SignalEngine not initialized");
+        return false;
+    }
 
     signal_protocol_address address = {
         peerId.c_str(),
@@ -147,24 +158,39 @@ bool SignalEngine::processPreKeyBundle(
 
     session_builder* builder = nullptr;
     if (session_builder_create(&builder, g_store.getStoreContext(), &address, g_ctx) != SG_SUCCESS) {
+        LOGE("Failed to create SessionBuilder");
         return false;
     }
 
-    session_pre_key_bundle* bundle = nullptr;
     
     // --- Decode Keys using standard API ---
     ec_public_key* preKeyObj = nullptr;
     ec_public_key* signedPreKeyObj = nullptr;
     ec_public_key* identityKeyObj = nullptr;
-
-    // We must check return codes for curve_decode_point, 
-    // but for brevity we check pointers after calls.
-    curve_decode_point(&preKeyObj, preKeyPublic.data(), preKeyPublic.size(), g_ctx);
-    curve_decode_point(&signedPreKeyObj, signedPreKeyPublic.data(), signedPreKeyPublic.size(), g_ctx);
-    curve_decode_point(&identityKeyObj, identityKey.data(), identityKey.size(), g_ctx);
-
+    
+    // 1. Only decode PreKey if we actually have data
+    if (!preKeyPublic.empty()) {
+        if (curve_decode_point(&preKeyObj, preKeyPublic.data(), preKeyPublic.size(), g_ctx) != SG_SUCCESS) {
+            LOGE("❌ Failed to decode PreKey Point!");
+            // Don't return yet, let the check below handle it
+        } else {
+            LOGI("✅ PreKey Decoded Successfully");
+        }
+    }
+    
+    if (curve_decode_point(&signedPreKeyObj, signedPreKeyPublic.data(), signedPreKeyPublic.size(), g_ctx) != SG_SUCCESS) {
+        LOGE("❌ Failed to decode SignedPreKey!");
+    }
+    if (curve_decode_point(&identityKeyObj, identityKey.data(), identityKey.size(), g_ctx) != SG_SUCCESS) {
+        LOGE("❌ Failed to decode IdentityKey!");
+    }
+    
     // Validate decoding
-    if (!preKeyObj || !signedPreKeyObj || !identityKeyObj) {
+    bool missingPreKey = (preKeyId > 0 && !preKeyObj);
+    bool missingMandatory = (!signedPreKeyObj || !identityKeyObj);
+    
+    if (missingPreKey || missingMandatory) {
+        LOGE("❌ Key Missing! PreKeyMissing=%d, MandatoryMissing=%d", missingPreKey, missingMandatory);
         if(preKeyObj) SIGNAL_UNREF(preKeyObj);
         if(signedPreKeyObj) SIGNAL_UNREF(signedPreKeyObj);
         if(identityKeyObj) SIGNAL_UNREF(identityKeyObj);
@@ -172,6 +198,7 @@ bool SignalEngine::processPreKeyBundle(
         return false;
     }
 
+    session_pre_key_bundle* bundle = nullptr;
     // Create the bundle struct
     int rc = session_pre_key_bundle_create(
         &bundle,
@@ -187,7 +214,15 @@ bool SignalEngine::processPreKeyBundle(
     );
 
     if (rc == SG_SUCCESS) {
+        LOGI("✅ Bundle Created. Processing...");
         rc = session_builder_process_pre_key_bundle(builder, bundle);
+        if (rc != SG_SUCCESS) {
+            LOGE("❌ session_builder_process_pre_key_bundle failed with code: %d", rc);
+        } else {
+            LOGI("🚀 SUCCESS! Session Established.");
+        }
+    }else {
+        LOGE("❌ session_pre_key_bundle_create failed with code: %d", rc);
     }
 
     // Cleanup
@@ -196,7 +231,7 @@ bool SignalEngine::processPreKeyBundle(
     }
     
     // Release our local references (bundle_create usually increments them internally)
-    SIGNAL_UNREF(preKeyObj);
+    if (preKeyObj) SIGNAL_UNREF(preKeyObj);
     SIGNAL_UNREF(signedPreKeyObj);
     SIGNAL_UNREF(identityKeyObj);
 
@@ -208,7 +243,10 @@ std::vector<uint8_t> SignalEngine::encrypt(
     const std::string& peerId,
     const std::vector<uint8_t>& plaintext
 ) {
-    if (!g_initialized) return {};
+    if (!g_initialized) {
+        LOGE("❌ SignalEngine not initialized");
+        return {};
+    }
 
     signal_protocol_address address = {
         peerId.c_str(),
@@ -217,28 +255,57 @@ std::vector<uint8_t> SignalEngine::encrypt(
     };
 
     session_cipher* cipher = nullptr;
-    if (session_cipher_create(&cipher, g_store.getStoreContext(), &address, g_ctx) != SG_SUCCESS)
+    if (session_cipher_create(&cipher, g_store.getStoreContext(), &address, g_ctx) != SG_SUCCESS) {
+        LOGE("❌ session_cipher_create failed");
         return {};
+    }
 
     ciphertext_message* encrypted = nullptr;
-    
+    int rc = session_cipher_encrypt(cipher, plaintext.data(), plaintext.size(), &encrypted);
     // Encrypt the message
-    if (session_cipher_encrypt(cipher, plaintext.data(), plaintext.size(), &encrypted) != SG_SUCCESS) {
+    if (rc != SG_SUCCESS) {
+        LOGE("❌ Encryption failed with code: %d", rc);
         session_cipher_free(cipher);
         return {};
     }
 
     // FIXED: Use accessor method instead of direct member access
     signal_buffer* buf = ciphertext_message_get_serialized(encrypted);
-    
+    signal_buffer* localBuf = nullptr;
+
+    if (!buf) {
+        LOGI("⚠️ No serialized buffer found. Serializing manually...");
+        int type = ciphertext_message_get_type(encrypted);
+        
+        if (type == CIPHERTEXT_PREKEY_TYPE) {
+            pre_key_signal_message* preMsg = (pre_key_signal_message*)encrypted;
+            rc = pre_key_signal_message_serialize(&localBuf, preMsg);
+        } else if (type == CIPHERTEXT_SIGNAL_TYPE) {
+            signal_message* sigMsg = (signal_message*)encrypted;
+            rc = signal_message_serialize(&localBuf, sigMsg);
+        } else {
+            LOGE("❌ Unknown message type: %d", type);
+        }
+        
+        if (rc == SG_SUCCESS && localBuf) {
+            buf = localBuf; // Point buf to our manual serialization
+        } else {
+            LOGE("❌ Manual serialization failed! RC=%d", rc);
+        }
+    }
     std::vector<uint8_t> out;
     if (buf) {
         out.assign(
             signal_buffer_data(buf),
             signal_buffer_data(buf) + signal_buffer_len(buf)
         );
+        LOGI("✅ Encrypted %zu bytes into %zu bytes (Type: %d)", 
+             plaintext.size(), out.size(), ciphertext_message_get_type(encrypted));
+    } else {
+        LOGE("❌ FINAL ERROR: Could not get bytes from encrypted message!");
     }
 
+    if (localBuf) signal_buffer_free(localBuf);
     SIGNAL_UNREF(encrypted);
     session_cipher_free(cipher);
     return out;
@@ -248,7 +315,10 @@ std::vector<uint8_t> SignalEngine::decrypt(
     const std::string& peerId,
     const std::vector<uint8_t>& ciphertext
 ) {
-    if (!g_initialized) return {};
+    if (!g_initialized) {
+        LOGE("❌ SignalEngine not initialized");
+        return {};
+    }
 
     signal_protocol_address address = {
         peerId.c_str(),
@@ -257,9 +327,10 @@ std::vector<uint8_t> SignalEngine::decrypt(
     };
 
     session_cipher* cipher = nullptr;
-    if (session_cipher_create(&cipher, g_store.getStoreContext(), &address, g_ctx) != SG_SUCCESS)
+    if (session_cipher_create(&cipher, g_store.getStoreContext(), &address, g_ctx) != SG_SUCCESS) {
+        LOGE("❌ session_cipher_create failed");
         return {};
-
+    }
     signal_buffer* plaintext = nullptr;
     int rc = SG_ERR_UNKNOWN;
     
@@ -281,6 +352,7 @@ std::vector<uint8_t> SignalEngine::decrypt(
     }
 
     if (rc != SG_SUCCESS || !plaintext) {
+        LOGE("❌ Decryption failed! RC=%d", rc);
         session_cipher_free(cipher);
         return {};
     }
@@ -293,4 +365,16 @@ std::vector<uint8_t> SignalEngine::decrypt(
     signal_buffer_free(plaintext);
     session_cipher_free(cipher);
     return out;
+}
+
+bool SignalEngine::sessionExists(const std::string& peerId) {
+    if (!g_initialized) return false;
+    
+    signal_protocol_address address = {
+        peerId.c_str(),
+        peerId.size(),
+        1 // deviceId
+    };
+    
+    return g_store.sessionStore.contains_session(&address, nullptr) == 1;
 }
