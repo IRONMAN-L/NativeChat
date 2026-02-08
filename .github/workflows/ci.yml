@@ -23,7 +23,7 @@ jobs:
       - name: Install Dependencies
         run: npm ci
       - name: Lint
-        run: npm run Lint
+        run: npm run lint
   
   # JOB 2: Build Docker HUB
   docker-push:
