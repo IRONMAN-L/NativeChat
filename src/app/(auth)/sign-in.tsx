@@ -1,12 +1,12 @@
-import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, Alert } from 'react-native'
-import { useState } from 'react'
-import { Link, useRouter } from 'expo-router';
-import { MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useSignIn } from '@clerk/clerk-expo';
-import TypeWriter from '../../components/TypeWriter';
-import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { useKeyboardLayoutStore } from '@/store/useKeyboardLayoutStore';
+import { useSignIn } from '@clerk/clerk-expo';
+import { MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
+import { Link, useRouter } from 'expo-router';
+import { useState } from 'react';
+import { ActivityIndicator, Alert, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import TypeWriter from '../../components/TypeWriter';
 export default function SignIn() {
   const [emailAddress, setEmailAddress] = useState<string>('');
   const [password, setPassword] = useState<string>('');
@@ -62,7 +62,7 @@ export default function SignIn() {
         keyboardShouldPersistTaps="handled"
         extraScrollHeight={9}
         className='flex-1'
-        contentContainerStyle={{flexGrow: 1, justifyContent: 'center'}}
+        contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }}
         showsVerticalScrollIndicator={false}
       >
         <View className="px-8 w-full items-center gap-8">
@@ -135,7 +135,7 @@ export default function SignIn() {
 
             {/* Footer / Login Link */}
             <View className="flex-row justify-center items-center gap-1">
-              <Text className="text-gray-500">Don't have an account?</Text>
+              <Text className="text-gray-500">Don&apos;t have an account?</Text>
               <Link href="/sign-up" asChild>
                 <TouchableOpacity>
                   <Text className="text-[#0e9484] font-bold">Sign Up</Text>

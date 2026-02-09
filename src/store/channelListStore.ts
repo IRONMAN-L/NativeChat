@@ -46,11 +46,10 @@ export const channelListStore = {
         const channels = await this.loadChannels();
         const target = channels.find(ch => ch.id === channelId);
 
-
         if (target) {
             const updatedChannel = {
                 ...target,
-                lastMessage: preview
+                lastMessage: preview.content ? preview : { ...target.lastMessage!, isRead: true } // handling mark as read status
             };
             await this.updateChannel(updatedChannel);
             return updatedChannel;

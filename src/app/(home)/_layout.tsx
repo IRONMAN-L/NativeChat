@@ -1,5 +1,4 @@
 import { Stack } from "expo-router";
-import { Platform } from "react-native";
 export default function ChatsDrawerLayout() {
   return (
     <Stack
@@ -29,13 +28,13 @@ export default function ChatsDrawerLayout() {
           // headerTransparent:true,
         }}
       />
-      <Stack.Screen name="new/NewChat" 
+      <Stack.Screen name="new/NewChat"
         options={{
           title: "New Chat",
           headerTitleStyle: {
-            fontWeight:'bold'
+            fontWeight: 'bold'
           },
-          presentation:"modal",
+          presentation: "modal",
         }}
       />
     </Stack>
