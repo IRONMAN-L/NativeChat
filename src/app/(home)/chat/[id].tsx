@@ -10,7 +10,7 @@ import { useUser } from '@clerk/clerk-expo';
 import { useQuery } from '@tanstack/react-query';
 import { decode } from 'base64-arraybuffer';
 import { Stack, useLocalSearchParams } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, Text, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 type ChatScreenParams = {
@@ -43,11 +43,60 @@ export default function ChatScreen() {
   const recipientUser = channel?.users?.find(user => user.id !== myself?.id);
   const recipientUserId = recipientUser?.id;
 
-  useEffect(() => {
-    loadInitialData();
-  }, [channelId, myself?.id]);
+  const processIncomingMessage = useCallback(async (msg: any) => {
+    try {
+      const senderId = msg.user_id;
+      const ciphertext = msg.message_recipients[0].ciphertext;
 
-  const loadInitialData = async () => {
+      // 🔐 DECRYPT
+      const decryptedPayload = await signal.decrypt(senderId, ciphertext);
+
+      if (!decryptedPayload) return null;
+
+      let finalText = decryptedPayload;
+      let securePayload = undefined;
+
+      // check if the text is secret payload (JSON)
+      if (decryptedPayload.startsWith('{') && decryptedPayload.includes('"type":"image"')) {
+        finalText = "📷 Photo";
+        securePayload = decryptedPayload;
+      }
+
+      // local logic
+      const newMsg: LocalMessage = {
+        id: msg.id,
+        text: finalText,
+        senderId: senderId,
+        senderName: recipientUser?.first_name ?? "",
+        imageUri: null,
+        createdAt: msg.created_at,
+        isMe: false, // It's incoming
+        status: 'read',
+        securePayload: securePayload
+      };
+
+      // Save to disk
+      // updated chatstore
+      setMessages(await chatStore.addMessage(channelId, newMsg))
+
+      // update channel preview
+      await channelListStore.updateChannelPreview(supabase, channelId, { content: newMsg.text, createdAt: newMsg.createdAt, isRead: true })
+
+      // update supabase message status
+      await supabase
+        .from('message_recipients')
+        .update({ status: 'read' })
+        .eq('recipient_user_id', myself?.id!)
+        .eq('message_id', msg.id)
+        .throwOnError();
+      return newMsg;
+    } catch (e) {
+      console.error("Failed to process message", e);
+      return null;
+    }
+  }, [channelId, myself?.id, recipientUser, supabase]);
+
+  const loadInitialData = useCallback(async () => {
     if (!myself?.id) return;
     // A. Show local data instantly ⚡
     const local = await chatStore.loadMessages(channelId);
@@ -73,7 +122,11 @@ export default function ChatScreen() {
       // Reload from store to update UI
       setMessages(await chatStore.loadMessages(channelId));
     }
-  };
+  }, [channelId, myself?.id, supabase, processIncomingMessage]);
+
+  useEffect(() => {
+    loadInitialData();
+  }, [loadInitialData]);
 
   // 2. Realtime Listener ⚡
   useEffect(() => {
@@ -135,62 +188,10 @@ export default function ChatScreen() {
       if (subscription) supabase.removeChannel(subscription);
     };
 
-  }, [channelId, myself?.id]);
+  }, [channelId, myself?.id, name, supabase]);
 
 
-  // 3. Decrypt & Store Logic
-  const processIncomingMessage = async (msg: any) => {
-    try {
-      const senderId = msg.user_id;
-      const ciphertext = msg.message_recipients[0].ciphertext;
 
-      // 🔐 DECRYPT
-      const decryptedPayload = await signal.decrypt(senderId, ciphertext);
-
-      if (!decryptedPayload) return null;
-
-      let finalText = decryptedPayload;
-      let securePayload = undefined;
-
-      // check if the text is secret payload (JSON)
-      if (decryptedPayload.startsWith('{') && decryptedPayload.includes('"type":"image"')) {
-        finalText = "📷 Photo";
-        securePayload = decryptedPayload;
-      }
-
-      // local logic
-      const newMsg: LocalMessage = {
-        id: msg.id,
-        text: finalText,
-        senderId: senderId,
-        senderName: recipientUser?.first_name ?? "",
-        imageUri: null,
-        createdAt: msg.created_at,
-        isMe: false, // It's incoming
-        status: 'read',
-        securePayload: securePayload
-      };
-
-      // Save to disk
-      // updated chatstore
-      setMessages(await chatStore.addMessage(channelId, newMsg))
-
-      // update channel preview
-      await channelListStore.updateChannelPreview(supabase, channelId, { content: newMsg.text, createdAt: newMsg.createdAt, isRead: true })
-
-      // update supabase message status
-      await supabase
-        .from('message_recipients')
-        .update({ status: 'read' })
-        .eq('recipient_user_id', myself?.id!)
-        .eq('message_id', msg.id)
-        .throwOnError();
-      return newMsg;
-    } catch (e) {
-      console.error("Failed to process message", e);
-      return null;
-    }
-  };
 
 
   const handleSendMessage = async (text: string, images: string[]) => {

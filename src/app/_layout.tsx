@@ -8,6 +8,7 @@ import { signal } from '@/native/signal';
 import SupabaseProvider, { useSupabase } from '@/providers/SupabaseProvider';
 import { registerBackgroundNotificationTask } from '@/services/backgroundNotificationTask';
 import { sendBackgroundTextMessage } from '@/services/chatService';
+import { channelListStore } from '@/store/channelListStore';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import * as Notifications from 'expo-notifications';
 import * as SecureStore from 'expo-secure-store';
@@ -22,6 +23,7 @@ const tokenCache = {
         try {
             return await SecureStore.getItemAsync(key);
         } catch (err) {
+            console.log(err);
             return null;
         }
     },
@@ -30,6 +32,7 @@ const tokenCache = {
             return SecureStore.setItemAsync(key, value);
         }
         catch (err) {
+            console.log(err);
             return;
         }
     }
@@ -61,16 +64,7 @@ function RootStack() {
             }
         }
         setupSignal();
-    }, [isSignedIn, myId, isSupabaseReady]);
-
-    if (!isLoaded) {
-        return (
-            <View className="flex-1 justify-center items-center">
-                <ActivityIndicator size={65} color="#0e9484" />
-                <Text className="text-[#0e9484] text-3xl"> Just a sec...</Text>
-            </View>
-        );
-    }
+    }, [isSignedIn, myId, isSupabaseReady, supabase]);
 
     useEffect(() => {
         if (!myId || !supabase) return;
@@ -79,6 +73,7 @@ function RootStack() {
             const userText = response.userText; // The text they typed!
             const data = response.notification.request.content.data;
             const channelId = data.channelId as string;
+            const messageId = data.messageId as string;
             // 1. Handle "Reply"
             if (actionId === 'reply' && userText && channelId) {
                 console.log(`User replied: ${userText} to channel ${channelId}`);
@@ -99,15 +94,14 @@ function RootStack() {
             }
 
             // 2. Handle "Mark as Read"
-            if (actionId === 'mark_read' && channelId) {
+            if (actionId === 'mark_read' && channelId && messageId) {
                 console.log("Marking as read...");
+                await channelListStore.updateChannelPreview(supabase, channelId, { content: "", createdAt: "", isRead: true })
                 // Call Supabase to update status
-                const { data: unread } = await supabase.from('messages')
-                    .select('id, message_recipients!inner(*)')
-                    .eq('channel_id', channelId)
-                    .eq('message_recipients.recipient_user_id', myId)
-                    .neq('message_recipients.status', 'read')
-
+                await supabase.from('message_recipients')
+                    .update({ status: 'read' })
+                    .eq('message_id', messageId)
+                    .eq('recipient_user_id', myId)
             }
         });
 
@@ -115,6 +109,15 @@ function RootStack() {
             responseListener.remove();
         };
     }, [myId, supabase]);
+
+    if (!isLoaded) {
+        return (
+            <View className="flex-1 justify-center items-center">
+                <ActivityIndicator size={65} color="#0e9484" />
+                <Text className="text-[#0e9484] text-3xl"> Just a sec...</Text>
+            </View>
+        );
+    }
 
     return (
         <Stack screenOptions={{ headerShown: false }}>

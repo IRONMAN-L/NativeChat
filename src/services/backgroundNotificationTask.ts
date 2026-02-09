@@ -35,7 +35,6 @@ TaskManager.defineTask(BACKGROUND_NOTIFICATION_TASK, async ({ data, error, execu
             console.log("No auth session in background. Cannot decrypt.");
             return;
         }
-        const myUserId = session.user.id;
 
         // fetch ciphertext from supabase
         const { data: messageData, error: msgError } = await supabase
@@ -92,7 +91,7 @@ TaskManager.defineTask(BACKGROUND_NOTIFICATION_TASK, async ({ data, error, execu
             content: {
                 title: senderName || "", // You can fetch sender name here if you want
                 body: finalText,
-                data: { channelId: channelId },
+                data: { channelId: channelId, messageId: messageData.id },
                 categoryIdentifier: 'chat_message', // Adds Reply buttons
                 sound: 'default',
             },

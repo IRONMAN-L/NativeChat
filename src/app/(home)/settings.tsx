@@ -1,7 +1,7 @@
 import { useAuth } from '@clerk/clerk-expo';
 import { Button, Text, View } from 'react-native';
 export default function Settings() {
-  const { signOut, userId } = useAuth();
+  const { signOut } = useAuth(); // take userId or details of the user
 
 
   return (

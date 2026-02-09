@@ -1,7 +1,7 @@
+import { useEffect } from 'react';
+import { Keyboard } from 'react-native';
 import { useKeyboardHandler } from 'react-native-keyboard-controller';
 import { useSharedValue } from 'react-native-reanimated';
-import {  Keyboard } from 'react-native';
-import { useEffect } from 'react';
 
 export const useGradualAnimation = () => {
     const height = useSharedValue(0);
@@ -11,12 +11,12 @@ export const useGradualAnimation = () => {
             onMove: (e) => {
                 "worklet";
                 height.value = Math.max(e.height, 0);
-                
+
             },
             onEnd: (e) => {
                 "worklet";
                 height.value = Math.max(e.height, 0);
-                
+
             }
         }, []
     );
@@ -29,7 +29,7 @@ export const useGradualAnimation = () => {
             }
         })
         return () => sub.remove();
-    }, []);
+    }, [height]);
 
     return { height };
 }

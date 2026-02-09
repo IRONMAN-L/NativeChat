@@ -1,9 +1,9 @@
-import { MaterialTopTabs } from "../../../components/MaterialTopTabs";
-import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import Ionicons from '@expo/vector-icons/Ionicons';
+import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { usePathname, useRouter } from 'expo-router';
-import { View, Text, Pressable } from 'react-native';
-import { useSafeAreaInsets, SafeAreaView } from 'react-native-safe-area-context';
+import { Pressable, Text, View } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { MaterialTopTabs } from "../../../components/MaterialTopTabs";
 
 const Header = () => {
   const router = useRouter();
@@ -103,9 +103,8 @@ const TabIcon = ({ icon, focused, title }: TabDetails) => {
 }
 
 export default function TabLayout() {
-  const insets = useSafeAreaInsets();
   return (
-    <SafeAreaView style={{flex: 1}} edges={["bottom"]}>
+    <SafeAreaView style={{ flex: 1 }} edges={["bottom"]}>
       <View className='flex-1 bg-white'>
         <Header />
         <MaterialTopTabs
@@ -130,7 +129,7 @@ export default function TabLayout() {
 
             },
             tabBarAndroidRipple: { borderless: true, radius: 30, color: '#e0e0e0' },
-            tabBarIndicatorStyle: { backgroundColor:'#0e9864' },
+            tabBarIndicatorStyle: { backgroundColor: '#0e9864' },
           }}
         >
           <MaterialTopTabs.Screen

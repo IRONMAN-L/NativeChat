@@ -9,7 +9,7 @@ import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, FlatList, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-export default function index() {
+export default function Index() {
   const insets = useSafeAreaInsets();
   const { supabase, isSupabaseReady } = useSupabase();
   const { user: myself } = useUser();
@@ -119,7 +119,7 @@ export default function index() {
       if (retryTimeout) clearTimeout(retryTimeout);
       if (subscription) supabase.removeChannel(subscription);
     };
-  }, [isSupabaseReady, myself]);
+  }, [isSupabaseReady, myself, getToken, supabase]);
 
   if (isLoading && (!channels || channels.length === 0)) return <ActivityIndicator />
 
