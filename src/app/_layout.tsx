@@ -66,15 +66,6 @@ function RootStack() {
         setupSignal();
     }, [isSignedIn, myId, isSupabaseReady, supabase]);
 
-    if (!isLoaded) {
-        return (
-            <View className="flex-1 justify-center items-center">
-                <ActivityIndicator size={65} color="#0e9484" />
-                <Text className="text-[#0e9484] text-3xl"> Just a sec...</Text>
-            </View>
-        );
-    }
-
     useEffect(() => {
         if (!myId || !supabase) return;
         const responseListener = Notifications.addNotificationResponseReceivedListener(async (response) => {
@@ -118,6 +109,15 @@ function RootStack() {
             responseListener.remove();
         };
     }, [myId, supabase]);
+
+    if (!isLoaded) {
+        return (
+            <View className="flex-1 justify-center items-center">
+                <ActivityIndicator size={65} color="#0e9484" />
+                <Text className="text-[#0e9484] text-3xl"> Just a sec...</Text>
+            </View>
+        );
+    }
 
     return (
         <Stack screenOptions={{ headerShown: false }}>
