@@ -11,12 +11,14 @@ type Props = {
 }
 
 export default function MessageInput({ keyboardHeight, setInputHeight, onSend, bottomInset }: Props) {
-    const [message, setMessage] = useState<string>('');
+    const [message, setMessage] = useState<string | null>(null);
     const [images, setImages] = useState<string[]>([]);
     const handleSend = async () => {
-        await onSend(message, images);
-        setMessage('');
+        const pivotMessage = message;
+        const pivotImages = images;
+        setMessage(null);
         setImages([]);
+        await onSend(pivotMessage!, pivotImages);
     }
     // keyboard go up
     const animatedStyle = useAnimatedStyle(() => {
@@ -117,7 +119,7 @@ export default function MessageInput({ keyboardHeight, setInputHeight, onSend, b
                 </TouchableOpacity>
                 <TextInput
                     placeholder="Type something..."
-                    value={message}
+                    value={message || ""}
                     onChangeText={setMessage}
                     placeholderTextColor={'gray'}
                     className="flex-1 bg-white px-3 py-2 text-base max-h-32"
@@ -132,7 +134,7 @@ export default function MessageInput({ keyboardHeight, setInputHeight, onSend, b
                     <MaterialIcons name="camera-alt" size={24} color="black" />
                 </TouchableOpacity>
                 <TouchableOpacity onPress={handleSend} disabled={!message && !images}>
-                    <MaterialIcons name={`${(message.trim() || images) ? "send" : "mic"}`} size={24} color="white" className="p-2 bg-[#0e9484] rounded-full" />
+                    <MaterialIcons name={`${(message?.trim() || images.length > 0) ? "send" : "mic"}`} size={24} color="white" className="p-2 bg-[#0e9484] rounded-full" />
                 </TouchableOpacity>
             </View>
         </Animated.View>

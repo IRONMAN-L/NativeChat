@@ -15,7 +15,7 @@ export default function SupabaseProvider({ children }: PropsWithChildren) {
 
     useEffect(() => {
         if (session) {
-            // 1. Inject the Clerk Token into our Singleton Client
+            // Inject the Clerk Token into our Singleton Client
             setClerkAuth(async () => {
                 return await session.getToken();
             });

@@ -9,12 +9,16 @@ import SupabaseProvider, { useSupabase } from '@/providers/SupabaseProvider';
 import { registerBackgroundNotificationTask } from '@/services/backgroundNotificationTask';
 import { sendBackgroundTextMessage } from '@/services/chatService';
 import { channelListStore } from '@/store/channelListStore';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import * as Notifications from 'expo-notifications';
 import * as SecureStore from 'expo-secure-store';
-import { useEffect, } from 'react';
-import { ActivityIndicator, Text, View } from 'react-native';
+import { useEffect } from 'react';
+import { ActivityIndicator, AppState, Text, View } from 'react-native';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
+import NativeTaskModule from '../../modules/native-task/src/NativeTaskModule';
+
 // TanStack query
 const queryClient = new QueryClient();
 
@@ -48,11 +52,33 @@ function RootStack() {
     const { supabase, isSupabaseReady } = useSupabase();
     const { expoPushToken } = usePushNotifications();
 
+    function sendReply(url: string, token: string, payload: Record<string, string>) {
+        NativeTaskModule.sendReply(
+            url,
+            token,
+            payload
+        );
+    }
+
+    function markAsRead(url: string, token: string, payload: Record<string, string>) {
+        NativeTaskModule.markAsRead(
+            url,
+            token,
+            payload
+        );
+    }
     useEffect(() => {
         if (expoPushToken) {
             registerBackgroundNotificationTask();
         }
     }, [expoPushToken]);
+
+    // Cache user ID for background tasks
+    useEffect(() => {
+        if (myId) {
+            AsyncStorage.setItem('current_user_id', myId);
+        }
+    }, [myId]);
 
     useEffect(() => {
         async function setupSignal() {
@@ -68,40 +94,117 @@ function RootStack() {
 
     useEffect(() => {
         if (!myId || !supabase) return;
+
         const responseListener = Notifications.addNotificationResponseReceivedListener(async (response) => {
+
             const actionId = response.actionIdentifier;
             const userText = response.userText; // The text they typed!
             const data = response.notification.request.content.data;
             const channelId = data.channelId as string;
             const messageId = data.messageId as string;
-            // 1. Handle "Reply"
-            if (actionId === 'reply' && userText && channelId) {
+            const originalSenderId = data.senderId as string;
+            const senderName = data.sender_name as string;
+            // CASE 1: notification body is clicked (open chat)
+            if (actionId === Notifications.DEFAULT_ACTION_IDENTIFIER) {
+                await Notifications.dismissNotificationAsync(response.notification.request.identifier);
+                router.push({
+                    pathname: '/chat/[id]',
+                    params: { name: senderName, id: channelId, message: data.message as string },
+                })
+            }
+            // CASE 2 Tap reply (Background action)
+            else if (actionId === 'reply' && userText && channelId) {
                 console.log(`User replied: ${userText} to channel ${channelId}`);
 
-                // TODO: Call your send message logic here
-                // Note: To do this purely in the background requires "Background Tasks"
-                // For now, it's easier to set opensAppToForeground: true in Step 1
-                const { data: channelUser } = await supabase
-                    .from('channel_users')
-                    .select('user_id')
-                    .eq('channel_id', channelId)
-                    .neq('user_id', myId) // not me
-                    .single();
-                if (channelUser) {
-                    await sendBackgroundTextMessage(supabase, channelId, myId, channelUser.user_id, userText)
-                    router.push(`/chat/${channelId}`)
-                }
-            }
+                if (AppState.currentState !== 'active') {
+                    console.log("We are in background!");
+                    const url = `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/send-reply`
+                    const anonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
+                    const ciphertext = await signal.encrypt(originalSenderId, userText)
+                    // handover to native module — uses anon key for gateway auth
+                    sendReply(
+                        url,
+                        anonKey,
+                        {
+                            channelId: channelId,
+                            ciphertext: ciphertext,
+                            recipient_user_id: originalSenderId,
+                            sender_id: myId!
+                        }
+                    );
 
+                    // update status too
+                    markAsRead(url, anonKey, {
+                        message_id: messageId,
+                        recipient_user_id: myId!,
+                        status: 'read',
+                        sender_id: originalSenderId,
+                        channel_id: channelId
+                    });
+
+                    // D. Update Notification UI (Append "You: ...")
+                    await Notifications.scheduleNotificationAsync({
+                        identifier: channelId, // Same ID updates the existing one
+                        content: {
+                            title: senderName,
+                            body: `You: ${userText}`,
+                            data: { ...data, message: userText }, // Keep data for next reply
+                            categoryIdentifier: 'chat_message',
+                        },
+                        trigger: null,
+                    });
+                }
+                else {
+                    const { data: channelUser } = await supabase
+                        .from('channel_users')
+                        .select('user_id')
+                        .eq('channel_id', channelId)
+                        .neq('user_id', myId) // not me
+                        .single();
+                    if (channelUser) {
+                        await sendBackgroundTextMessage(supabase, channelId, myId, channelUser.user_id, userText)
+                        await Notifications.scheduleNotificationAsync({
+                            identifier: channelId, // MUST MATCH the ID used in background task
+                            content: {
+                                title: "Chat",
+                                body: `You: ${userText}`, // Update body to show your reply
+                                data: { channelId },
+                                categoryIdentifier: 'chat_message',
+                            },
+                            trigger: null,
+                        });
+                        await supabase.from('message_recipients')
+                            .update({ status: 'read' })
+                            .eq('message_id', messageId)
+                            .eq('recipient_user_id', myId)
+                    }
+                }
+                await Notifications.dismissNotificationAsync(channelId);
+            }
             // 2. Handle "Mark as Read"
-            if (actionId === 'mark_read' && channelId && messageId) {
+            else if (actionId === 'mark_read' && channelId && messageId) {
                 console.log("Marking as read...");
                 await channelListStore.updateChannelPreview(supabase, channelId, { content: "", createdAt: "", isRead: true })
-                // Call Supabase to update status
-                await supabase.from('message_recipients')
-                    .update({ status: 'read' })
-                    .eq('message_id', messageId)
-                    .eq('recipient_user_id', myId)
+
+                if (AppState.currentState !== 'active') {
+                    // Background: use native module → edge function
+                    const url = `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/update-message-status`;
+                    const anonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
+                    markAsRead(url, anonKey, {
+                        message_id: messageId,
+                        recipient_user_id: myId!,
+                        status: 'read',
+                        sender_id: originalSenderId,
+                        channel_id: channelId
+                    });
+                } else {
+                    // Foreground: use supabase client directly
+                    await supabase.from('message_recipients')
+                        .update({ status: 'read' })
+                        .eq('message_id', messageId)
+                        .eq('recipient_user_id', myId)
+                }
+                await Notifications.dismissNotificationAsync(channelId);
             }
         });
 

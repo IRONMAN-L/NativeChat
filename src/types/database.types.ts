@@ -78,6 +78,8 @@ export type Database = {
           message_id: string | null
           recipient_device_id: number | null
           recipient_user_id: string
+          sender_id: string | null
+          channel_id: string | null
           status: Database["public"]["Enums"]["message-status"]
         }
         Insert: {
@@ -86,6 +88,8 @@ export type Database = {
           message_id?: string | null
           recipient_device_id?: number | null
           recipient_user_id: string
+          sender_id?: string | null
+          channel_id?: string | null
           status?: Database["public"]["Enums"]["message-status"]
         }
         Update: {
@@ -94,6 +98,8 @@ export type Database = {
           message_id?: string | null
           recipient_device_id?: number | null
           recipient_user_id?: string
+          sender_id?: string | null
+          channel_id?: string | null
           status?: Database["public"]["Enums"]["message-status"]
         }
         Relationships: [

@@ -4,27 +4,65 @@ import { chatStore, LocalMessage } from '@/store/chatStore';
 import { Database } from '@/types/database.types';
 import { SupabaseClient } from '@supabase/supabase-js';
 import * as Notifications from 'expo-notifications';
-// import {  } from 'expo-router';
+
+// Dedup set: prevents double-processing when both background task AND
+// realtime listener try to handle the same message (race condition).
+const processedMessages = new Set<string>();
+const MAX_PROCESSED_CACHE = 200;
+const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
+
 // We pass the supabase client in because it might be needed for lookups
 export const handleNewMessage = async (
     payload: any,
     supabase: SupabaseClient<Database>,
-    recipientUserName?: string
+    recipientUserName?: string,
+    skipNotification?: boolean
 ) => {
     try {
+        const newRow = payload.new; // From 'message_recipients' table
+        const messageId = newRow.message_id;
+
+        // Skip if already processed (prevents Signal ratchet double-advance)
+        if (processedMessages.has(messageId)) {
+            console.log("Message already processed, skipping:", messageId);
+            return null;
+        }
+        processedMessages.add(messageId);
+
+        // Keep set from growing forever
+        if (processedMessages.size > MAX_PROCESSED_CACHE) {
+            const first = processedMessages.values().next().value;
+            if (first) processedMessages.delete(first);
+        }
+
         console.log("📨 Processing New Message...");
 
-        const newRow = payload.new; // From 'message_recipients' table
 
         // 1. We need the Channel ID and Sender ID to proceed
         // (The recipient row only has message_id, we need metadata)
-        const { data: meta, error } = await supabase
-            .from('messages')
-            .select('*')
-            .eq('id', newRow.message_id)
-            .single();
+        let meta: any;
+        if (newRow.created_at) {
+            meta = newRow;
+        } else {
+            let attempts = 0;
+            while (attempts < 3) {
+                const { data, error } = await supabase
+                    .from('messages')
+                    .select('*')
+                    .eq('id', newRow.message_id)
+                    .single();
 
-        if (error || !meta) {
+                if (!error && data) {
+                    meta = data;
+                    break;
+                }
+
+                console.warn(`Attempt ${attempts + 1} failed to fetch metadata. Retrying...`);
+                await delay(1000);
+                attempts++;
+            }
+        }
+        if (!meta) {
             console.error("❌ Metadata missing for message:", newRow.message_id);
             return;
         }
@@ -66,7 +104,7 @@ export const handleNewMessage = async (
             id: newRow.message_id,
             text: displayContent,
             senderId: meta.user_id!,
-            senderName: senderDetails?.first_name ?? "",
+            senderName: recipientUserName ? recipientUserName : senderDetails?.first_name ?? "",
             createdAt: meta.created_at,
             isMe: false,
             status: 'delivered', // It reached us
@@ -77,23 +115,27 @@ export const handleNewMessage = async (
         await chatStore.addMessage(meta.channel_id!, newMessage);
 
 
-        // 6. Send Local Notification 🔔
-        await Notifications.scheduleNotificationAsync({
-            content: {
-                title: recipientUserName ? recipientUserName : senderDetails?.first_name ?? "",
-                body: displayContent,
-                data: { channelId: meta.channel_id },
-                categoryIdentifier: 'chat_message',
-                sound: 'default',
-            },
-            trigger: null, // Show immediately
-        });
+        // 6. Send Local Notification 🔔 (skip when app is in foreground)
+        if (!skipNotification) {
+            await Notifications.scheduleNotificationAsync({
+                content: {
+                    title: recipientUserName ? recipientUserName : senderDetails?.first_name ?? "",
+                    body: displayContent,
+                    data: { channelId: meta.channel_id },
+                    categoryIdentifier: 'chat_message',
+                    sound: 'default',
+                },
+                trigger: null, // Show immediately
+            });
+        }
 
-        await supabase.from('message_recipients').update({ status: 'delivered' }).eq('id', newRow.id);
-
+        await supabase.from('message_recipients').update({ status: 'delivered' }).eq('message_id', messageId).eq('recipient_user_id', newRow.recipient_user_id);
         console.log("Message Decrypted, Stored & Notified!");
+        return { message: newMessage, channelId: meta.channel_id! };
 
     } catch (e) {
         console.error("Error in messageHandler:", e);
+        return null;
     }
 };
+

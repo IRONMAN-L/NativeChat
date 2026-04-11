@@ -54,13 +54,13 @@ export const channelListStore = {
             await this.updateChannel(updatedChannel);
             return updatedChannel;
         } else { // message received from a new channel
-            const { data, error } = await supabase.from('channel_users')
-                .select('*, channels(*, user(*))')
-                .eq('channel_id', channelId)
+            const { data, error } = await supabase.from('channels')
+                .select('*, users(*)')
+                .eq('id', channelId)
                 .single();
             if (!data || error) return {} as LocalChannel;
 
-            const newChannel = {
+            const newChannel: LocalChannel = {
                 ...data,
                 lastMessage: preview
             }

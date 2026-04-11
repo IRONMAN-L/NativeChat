@@ -1,124 +1,127 @@
-import { supabase } from '@/lib/supabase';
 import { signal } from '@/native/signal';
-import { channelListStore } from '@/store/channelListStore';
 import { chatStore } from '@/store/chatStore';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import * as TaskManager from 'expo-task-manager';
-import { AppState } from 'react-native';
+import { AppState, DeviceEventEmitter } from 'react-native';
+import NativeTaskModule from '../../modules/native-task/src/NativeTaskModule';
+
+export const FOREGROUND_PUSH_EVENT = 'foreground-push-message';
+
 const BACKGROUND_NOTIFICATION_TASK = 'BACKGROUND-NOTIFICATION-TASK';
 
 TaskManager.defineTask(BACKGROUND_NOTIFICATION_TASK, async ({ data, error, executionInfo }) => {
+    // 1. If app is in foreground, emit event for the React tree to handle
+    //    (useChats listens for this and routes through handleNewMessage with dedup)
     if (AppState.currentState === 'active') {
-        console.log(" App is active. Skipping background notification task.");
+        try {
+            const payload = data as any;
+            if (payload.actionIdentifier) return;
+            const rawData = JSON.parse(payload.data.body);
+            const { ciphertext, sender_id, channel_id, message_id, sender_name, created_at } = rawData;
+            if (ciphertext && sender_id && channel_id && message_id && sender_name && created_at) {
+                console.log("📬 App is in foreground, emitting push event for React tree...");
+                DeviceEventEmitter.emit(FOREGROUND_PUSH_EVENT, rawData);
+            }
+        } catch (e) {
+            // parse failed — ignore
+        }
         return;
     }
     if (error) {
-        console.error(" Background Task Error:", error);
+        console.error("Background Task Error:", error);
         return;
     }
 
     try {
-        // Parse the payload
-        const payload = (data as any).notification?.data;
+        // Checking whether is it a reply or mark_read identifier
+        const payload = data as any;
+        if (payload.actionIdentifier) {
+            console.log("⚠️ Background Task woke up for Interaction (Reply). Ignoring...");
+            return;
+        }
+        // 2. Parse the "Payload-First" Data
+        console.log("Background message arrived");
+        const rawData = JSON.parse(payload.data.body)
 
-        if (!payload || !payload.message_id) {
-            console.log("No message_id in background payload");
+        // Ensure we have the "Ingredients"
+        const { ciphertext, sender_id, channel_id, sender_name, created_at, message_id } = rawData;
+
+        if (!ciphertext || !sender_id || !channel_id || !sender_name || !created_at || !message_id) {
+            console.log("❌ Missing payload data. Cannot decrypt.");
             return;
         }
 
-        const messageId = payload.message_id;
-        console.log(`Background waking up for message: ${messageId}`);
+        console.log(`🔐 Decrypting background message from ${sender_name}...`);
 
-        // we may not have userId, so fetch from async storage (supabase stores in async storage)
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session) {
-            console.log("No auth session in background. Cannot decrypt.");
+        // 3. Decrypt Locally
+        const decryptedText = await signal.decrypt(sender_id, ciphertext);
+
+        if (!decryptedText) {
+            console.error("❌ Decryption failed locally.");
             return;
         }
 
-        // fetch ciphertext from supabase
-        const { data: messageData, error: msgError } = await supabase
-            .from('messages')
-            .select('*, message_recipients!inner(ciphertext)')
-            .eq('id', messageId)
-            .single();
-        if (msgError || !messageData) {
-            console.error("Could not fetch message in background", msgError);
-            return;
-        }
-
-        const senderId = messageData.user_id;
-        const channelId = messageData.channel_id;
-        const ciphertext = messageData.message_recipients[0].ciphertext;
-
-        if (!senderId || !ciphertext || !channelId) {
-            console.log("There is no message fetched form server");
-            return;
-        }
-        // decrypt
-        const decryptedPayload = await signal.decrypt(senderId, ciphertext);
-        if (!decryptedPayload) {
-            console.error("Failed to decrypt message in background");
-            return;
-        }
-
-        let finalText = decryptedPayload;
+        // 4. Handle Media Pointers
+        let displayText = decryptedText;
         let securePayload = undefined;
-        if (decryptedPayload.startsWith('{') && decryptedPayload.includes('"type":"image"')) {
-            finalText = "📷 Photo";
-            securePayload = decryptedPayload;
+
+        // If the text is actually a JSON pointing to an image
+        if (decryptedText.startsWith('{') && decryptedText.includes('"type":"image"')) {
+            displayText = "📷 Photo";
+            securePayload = decryptedText;
         }
-        // store or update the channel
-        const receivedChannel = await channelListStore.updateChannelPreview(supabase, channelId, { content: finalText, createdAt: messageData.created_at, isRead: false })
-        const senderName = receivedChannel.users?.find(user => user.id === senderId)?.first_name;
 
-        // store the message
-        const finalMsg = {
-            id: messageData.id,
-            text: finalText,
-            senderId: senderId,
-            senderName: senderName || "",
-            imageUri: null,
-            createdAt: messageData.created_at,
-            isMe: false, // It's incoming
-            status: 'read' as const,
-            securePayload: securePayload
+        // 5. Update Local Stores
+        const msg = {
+            id: message_id,
+            text: displayText,
+            senderId: sender_id,
+            senderName: sender_name,
+            createdAt: created_at,
+            isMe: false,
+            status: 'sent' as const,
+            securePayload,
+            imageUri: null
         };
-        await chatStore.addMessage(channelId, finalMsg)
 
-        // show local notification
+        // Update stores
+        await chatStore.addMessage(channel_id, msg);
+
+
+        // 6. Show the Notification
         await Notifications.scheduleNotificationAsync({
+            identifier: channel_id, // Grouping Key
             content: {
-                title: senderName || "", // You can fetch sender name here if you want
-                body: finalText,
-                data: { channelId: channelId, messageId: messageData.id },
-                categoryIdentifier: 'chat_message', // Adds Reply buttons
+                title: sender_name,
+                body: displayText,
+                data: { channelId: channel_id, messageId: msg.id, name: sender_name, senderId: sender_id, created_at: created_at }, // For navigation on tap
+                categoryIdentifier: 'chat_message',
                 sound: 'default',
             },
             trigger: null,
-        })
+        });
+
+        // 7. Mark as delivered via edge function
+        const currentUserId = await AsyncStorage.getItem('current_user_id');
+        if (currentUserId) {
+            const url = `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/update-message-status`;
+            const token = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
+            NativeTaskModule.markAsRead(url, token, {
+                message_id: message_id,
+                recipient_user_id: currentUserId,
+                status: 'delivered',
+                sender_id: sender_id,
+                channel_id: channel_id
+            });
+        }
 
     } catch (err) {
-        console.error("Background Task Failed:", err);
-
-        await Notifications.scheduleNotificationAsync({
-            content: {
-                title: "Someone",
-                body: "New message for you",
-                categoryIdentifier: undefined,
-                sound: false,
-            },
-            trigger: {
-                channelId: 'silent',
-                second: 0,
-            },
-        })
+        console.warn("Background Decryption Failed:", err);
     }
-})
+});
 
 export const registerBackgroundNotificationTask = async () => {
-    // This tells Expo: "If a notification comes in while app is backgrounded, run this task"
-    // Note: This specific API is for "Background Fetch" or "Data Notifications".
-    // For Expo Push Notifications specifically, we use:
+    console.log("registerBackgroundNotificationTask");
     Notifications.registerTaskAsync(BACKGROUND_NOTIFICATION_TASK);
 };
