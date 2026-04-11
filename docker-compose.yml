@@ -12,7 +12,7 @@ services:
       - .:/app             # Syncs your folder with the container
       - /app/node_modules # Prevents local node_modules from overwriting container's
     environment:
-      - REACT_NATIVE_PACKAGER_HOSTNAME=${LOCAL_IP}
+      - REACT_NATIVE_PACKAGER_HOSTNAME=${EXPO_LOCAL_IP}
       # - EXPO_DEVTOOLS_LISTEN_ADDRESS=0.0.0.0
       # - ADB_IP=host.docker.internal # Optional: For connecting to emulator
     # This keeps the container running so you can enter it

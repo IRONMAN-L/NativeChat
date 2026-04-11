@@ -67,3 +67,33 @@ export const sendBackgroundTextMessage = async (
         console.log(error);
     }
 }
+
+export const updateMessageStatusOnServer = async (
+    messageId: string,
+    recipientUserId: string,
+    status: 'delivered' | 'read',
+    senderId: string,
+    channelId: string
+) => {
+    try {
+        const url = `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/update-message-status`;
+        const anonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
+        await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${anonKey}`,
+                'apikey': anonKey,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                message_id: messageId,
+                recipient_user_id: recipientUserId,
+                status,
+                sender_id: senderId,
+                channel_id: channelId
+            }),
+        });
+    } catch (e) {
+        console.warn(`Failed to mark message ${messageId} as ${status}:`, e);
+    }
+};

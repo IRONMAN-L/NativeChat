@@ -1,24 +1,28 @@
 import { useGradualAnimation } from '@/components/GradualAnimation';
 import MessageInput from '@/components/MessageInput';
 import MessageList from '@/components/MessageList';
+import { useChats } from '@/hooks/useChats';
 import { signal } from '@/native/signal';
 import { useSupabase } from '@/providers/SupabaseProvider';
-import { handleNewMessage } from '@/services/messageHandler';
 import { channelListStore } from '@/store/channelListStore';
 import { chatStore, LocalMessage } from '@/store/chatStore';
 import { useUser } from '@clerk/clerk-expo';
 import { useQuery } from '@tanstack/react-query';
 import { decode } from 'base64-arraybuffer';
-import { Stack, useLocalSearchParams } from 'expo-router';
+import { Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, Text, View } from 'react-native';
+import { ActivityIndicator, AppState, FlatList, Text, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 type ChatScreenParams = {
   id: string;
   name?: string;
+  message?: string;
+  senderId?: string,
+  created_at?: string,
+  messageId?: string,
 }
 export default function ChatScreen() {
-  const { id: channelId, name } = useLocalSearchParams<ChatScreenParams>();
+  const { id: channelId, name, message: noteMessage, senderId: noteSenderId, created_at: noteCreatedAt, messageId: noteMessageId } = useLocalSearchParams<ChatScreenParams>();
   const { height } = useGradualAnimation();
   const [inputHeight, setInputHeight] = useState(56);
 
@@ -27,6 +31,7 @@ export default function ChatScreen() {
   const bottomInset = insets.bottom;
   const { supabase, isSupabaseReady } = useSupabase();
   const { user: myself } = useUser();
+  const { addMessageListener, addStatusListener, loadLocalData: refreshGlobalChats } = useChats();
   const [messages, setMessages] = useState<LocalMessage[]>();
 
 
@@ -89,6 +94,12 @@ export default function ChatScreen() {
         .eq('recipient_user_id', myself?.id!)
         .eq('message_id', msg.id)
         .throwOnError();
+
+      // tell the sender immediately that we read it
+      const channel = supabase.channel(`user_updates:${senderId}`);
+      await channel.httpSend('status_update', { message_id: msg.id, status: 'read', channel_id: channelId });
+      supabase.removeChannel(channel);
+
       return newMsg;
     } catch (e) {
       console.error("Failed to process message", e);
@@ -99,8 +110,26 @@ export default function ChatScreen() {
   const loadInitialData = useCallback(async () => {
     if (!myself?.id) return;
     // A. Show local data instantly ⚡
-    const local = await chatStore.loadMessages(channelId);
-    setMessages(local);
+    let local = await chatStore.loadMessages(channelId);
+
+    // Any incoming messages currently in local store still marked as delivered need to be read
+    const unreadLocal = local.filter(m => !m.isMe && m.status !== 'read');
+    if (unreadLocal.length > 0) {
+      let prom = [];
+      for (const m of unreadLocal) {
+        prom.push(chatStore.updateMessageStatus(channelId, m.id, 'read'));
+      }
+      await Promise.all(prom);
+      setMessages(await chatStore.loadMessages(channelId));
+
+      for (const msg of unreadLocal) {
+        await supabase.from('message_recipients')
+          .update({ status: 'read' })
+          .eq('message_id', msg.id)
+          .eq('recipient_user_id', myself.id);
+      }
+    }
+
 
     // B. Fetch Missed Messages from Cloud ☁️
     const lastTimeStamp = local.length > 0 ? local[local.length - 1].createdAt : '1970-01-01';
@@ -126,91 +155,101 @@ export default function ChatScreen() {
 
   useEffect(() => {
     loadInitialData();
-  }, [loadInitialData]);
+    async function backgroundUpdation() {
+      if (noteMessage && noteMessageId && noteCreatedAt && noteSenderId && name) {
+        const msg: LocalMessage = {
+          id: noteMessageId,
+          text: noteMessage,
+          imageUri: null,
+          createdAt: noteCreatedAt,
+          senderName: name,
+          senderId: noteSenderId,
+          isMe: true,
+          status: 'sent' as const
+        }
+        setMessages(await chatStore.addMessage(channelId, msg));
 
-  // 2. Realtime Listener ⚡
-  useEffect(() => {
-    if (!myself?.id || !channelId) return;
-
-    // Setup Subscription
-    let subscription: any;
-    let retryTimeout: ReturnType<typeof setTimeout>;
-
-    const setupSubscription = () => {
-      console.log(`🔌 Subscribing to channel: chat:${channelId}`);
-
-      subscription = supabase
-        .channel(`chat:${channelId}`) // Unique name for this connection
-        .on(
-          'postgres_changes',
-          {
-            event: 'INSERT',
-            schema: 'public',
-            table: 'message_recipients',
-            filter: `recipient_user_id=eq.${myself?.id}` // 🔒 ONLY listen for messages sent TO ME
-          },
-          async (payload) => {
-            console.log("⚡ REALTIME EVENT RECEIVED:", payload);
-
-            await handleNewMessage(payload, supabase, name!);
-
-            setMessages(await chatStore.loadMessages(channelId));
-            // mark as read in supabase
-            await supabase.from('message_recipients')
-              .update({ status: 'read' })
-              .eq('id', payload.new.id);
-
-          }
-        )
-        .subscribe((status) => {
-          // Debugging: Tells you if the connection is actually working
-          if (status === 'SUBSCRIBED') {
-            console.log(" Phone is plugged in! Waiting for calls...");
-          } else if (status === 'CHANNEL_ERROR') {
-            console.warn(" Connection dropped/rejected. Retrying in 3s...");
-            // remove the broken channel
-            supabase.removeChannel(subscription);
-            // retry after 3 seconds
-            retryTimeout = setTimeout(() => {
-              setupSubscription();
-            }, 3000);
-          }
-        });
+        await channelListStore.updateChannelPreview(supabase, channelId, { content: noteMessage!, createdAt: noteCreatedAt, isRead: true });
+        refreshGlobalChats(); // Update Index page
+      }
     }
 
-    // Start listener
-    setupSubscription();
-
-    // Cleanup: Unplug when user leaves the screen
-    return () => {
-      console.log("🔌 Unsubscribing...");
-      if (retryTimeout) clearTimeout(retryTimeout)
-      if (subscription) supabase.removeChannel(subscription);
-    };
-
-  }, [channelId, myself?.id, name, supabase]);
+    backgroundUpdation();
 
 
+  }, [loadInitialData]);
 
+  // 2. Listen for new messages via the global listener in useChats
+  useFocusEffect(
+    useCallback(() => {
+      if (!myself?.id || !channelId) return;
 
+      const removeListener = addMessageListener(`chat:${channelId}`, async (_senderId, newMessage) => {
+        // The message was already saved to chatStore by handleNewMessage, now update locally to read
+        const updatedMessages = await chatStore.updateMessageStatus(channelId, newMessage.id, 'read');
+        setMessages(updatedMessages);
 
+        // Mark as read since user is viewing this chat
+        await supabase.from('message_recipients')
+          .update({ status: 'read' })
+          .eq('message_id', newMessage.id)
+          .eq('recipient_user_id', myself.id);
+      });
+
+      return () => {
+        removeListener();
+      };
+    }, [channelId, myself?.id, supabase, addMessageListener])
+  );
+
+  // 3. Listen for status updates (delivered/read) on messages I SENT → update ticks
+  useFocusEffect(
+    useCallback(() => {
+      if (!channelId) return;
+
+      const removeListener = addStatusListener(`status:${channelId}`, async (messageId, status) => {
+        // Update the message status locally (e.g. sent→delivered→read)
+        const updated = await chatStore.updateMessageStatus(channelId, messageId, status as LocalMessage['status']);
+        setMessages(updated);
+        console.log(`Tick updated: ${messageId} → ${status}`);
+      });
+
+      return () => {
+        removeListener();
+      };
+    }, [channelId, addStatusListener])
+  );
+
+  // 4. Reload messages from local store when app returns to foreground
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', async (nextState) => {
+      if (nextState === 'active') {
+        const local = await chatStore.loadMessages(channelId);
+        setMessages(local);
+      }
+    });
+    return () => subscription.remove();
+  }, [channelId]);
   const handleSendMessage = async (text: string, images: string[]) => {
 
     // scroll to end
 
     listRef.current?.scrollToOffset({ offset: 0, animated: true });
 
-
+    const prom = []
     if (images.length > 0) {
       // Send them sequentially (or Promise.all if you prefer)
+
       for (const uri of images) {
-        await sendSingleMessage(uri, 'image'); // Call the single image sender helper
+        prom.push(sendSingleMessage(uri, 'image')); // Call the single image sender helper
       }
+
     }
 
     if (text.trim()) {
-      await sendSingleMessage(text, 'text');
+      prom.push(sendSingleMessage(text, 'text'));
     }
+    await Promise.all(prom);
 
   };
 
@@ -222,7 +261,7 @@ export default function ChatScreen() {
     const optimisticMsg: LocalMessage = {
       id: tempId,
       text: type === 'image' ? "📷 Photo" : content,
-      imageUri: type === 'image' ? content : null, // <--- SHOW THIS INSTANTLY
+      imageUri: type === 'image' ? content : null, // SHOW THIS INSTANTLY
       senderId: myself?.id!,
       senderName: recipientUser?.first_name ?? "",
       createdAt: new Date().toISOString(),
@@ -274,7 +313,9 @@ export default function ChatScreen() {
         recipient_user_id: recipientUserId,
         recipient_device_id: 1,
         ciphertext: finalCipherText,
-        status: 'sent'
+        status: 'sent',
+        sender_id: myself?.id,
+        channel_id: channelId
       })
 
       if (msgRecipientError) throw msgRecipientError;
@@ -291,6 +332,7 @@ export default function ChatScreen() {
 
       // update channel preview
       await channelListStore.updateChannelPreview(supabase, channelId, { content: finalMsg.text, createdAt: finalMsg.createdAt, isRead: true })
+      refreshGlobalChats();
     } catch (err) {
       console.error("Send failed:", err);
     }
