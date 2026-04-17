@@ -1,7 +1,7 @@
 import { signal } from '@/native/signal';
 import { useSupabase } from "@/providers/SupabaseProvider";
 import { User } from "@/types";
-import { Image, Pressable, Text, View } from 'react-native';
+import { Image, Text, TouchableOpacity, View } from 'react-native';
 type UserListItemProps = {
     user: User;
     onPress?: (user: User) => void;
@@ -15,7 +15,7 @@ export default function UserListItem({ user, onPress }: UserListItemProps) {
         await signal.establishSession(id, supabase);
     }
     return (
-        <Pressable
+        <TouchableOpacity
             onPress={async () => {
                 await establishHandShake(user.id);
                 onPress?.(user)
@@ -37,7 +37,7 @@ export default function UserListItem({ user, onPress }: UserListItemProps) {
                     {user.first_name} {user.last_name}
                 </Text>
             </View>
-        </Pressable>
+        </TouchableOpacity>
     )
 
 }

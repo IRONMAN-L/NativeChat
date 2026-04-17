@@ -1,6 +1,11 @@
+import { useChats } from '@/hooks/useChats';
+import { userStore } from '@/store/userStore';
+import { User } from '@/types';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
-import { usePathname, useRouter } from 'expo-router';
+import { Image as ExpoImage } from 'expo-image';
+import { useFocusEffect, usePathname, useRouter } from 'expo-router';
+import { useCallback, useMemo, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialTopTabs } from "../../../components/MaterialTopTabs";
@@ -10,14 +15,24 @@ const Header = () => {
   const insets = useSafeAreaInsets();
   const pathname = usePathname();
   let title = "NativeChat";
-  let showCamera = true;
+  let showCamera = false;
   let showProfile = true;
   let showSearch = false;
 
+  const [myDetails, setMyDetails] = useState<User | null>(null);
+  useFocusEffect(
+    useCallback(() => {
+      async function loadUser() {
+        const u = await userStore.getMyDetails();
+        if (u) setMyDetails(u);
+      }
+      loadUser();
+    }, [])
+  );
 
   if (pathname.includes('/status')) {
     title = "Status";
-    showCamera = true;
+    showCamera = false;
     showProfile = false;
     showSearch = false;
   } else if (pathname.includes('/communities')) {
@@ -59,8 +74,14 @@ const Header = () => {
           android_ripple={{ borderless: true, radius: 20 }}
           className="active:opacity-50"
         >
-          {showProfile ? <MaterialIcons name="account-circle" size={24} color="black" /> : null}
-          {!showProfile ? <Ionicons name="ellipsis-vertical" size={24} color="black" /> : null}
+          {showProfile ? (
+            myDetails?.avatar_url ? (
+              <ExpoImage source={myDetails.avatar_url} style={{ width: 28, height: 28, borderRadius: 14 }} transition={200} />
+            ) : (
+              <MaterialIcons name="account-circle" size={28} color="gray" />
+            )
+          ) : null}
+          {!showProfile ? <Ionicons name="ellipsis-vertical" size={24} color="gray" /> : null}
         </Pressable>
 
 
@@ -103,6 +124,13 @@ const TabIcon = ({ icon, focused, title }: TabDetails) => {
 }
 
 export default function TabLayout() {
+  const { chats } = useChats();
+  const unreadCount = useMemo(() => {
+    const total = chats.reduce((acc, currentChat) => {
+      return acc + (currentChat.lastMessage?.unreadCount ?? 0);
+    }, 0);
+    return total > 0 ? total.toString() : null;
+  }, [chats]);
   return (
     <SafeAreaView style={{ flex: 1 }} edges={["bottom"]}>
       <View className='flex-1 bg-white'>
@@ -137,17 +165,21 @@ export default function TabLayout() {
             options={{
               title: "Chats",
               tabBarIcon: ({ focused }) => <TabIcon icon="chat" focused={focused} title="Chats" />,
-              tabBarBadge: () => (
-                <View className='bg-red-600 rounded-full right-5 px-2'>
-                  <Text className="text-sm text-white">7</Text>
-                </View>
-              ),
+              tabBarBadge: () => {
+                if (!unreadCount) return <></>;
+                return (
+                  <View className='bg-red-600 rounded-full min-w-[20px] px-1 top-2 right-4 absolute items-center justify-center' style={{ height: 20 }}>
+                    <Text className="text-white font-bold" style={{ fontSize: 11 }}>{unreadCount}</Text>
+                  </View>
+                )
+              }
+
 
 
             }}
           />
 
-          <MaterialTopTabs.Screen
+          {/* <MaterialTopTabs.Screen
             name="status"
             options={{
               title: "Status",
@@ -162,7 +194,7 @@ export default function TabLayout() {
               tabBarIcon: ({ focused }) => <TabIcon icon="groups" focused={focused} title="Groups" />
 
             }}
-          />
+          />*/}
           <MaterialTopTabs.Screen
             name="calls"
             options={{

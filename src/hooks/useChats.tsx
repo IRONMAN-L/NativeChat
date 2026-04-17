@@ -113,9 +113,12 @@ export function ChatsProvider({ children }: PropsWithChildren) {
 
         let subscription: any;
         let retryTimeout: ReturnType<typeof setTimeout>;
+        let isMounted = true;
 
         const setupSubscription = async () => {
             const token = await getTokenRef.current();
+
+            if (!isMounted) return;
 
             if (!token) {
                 console.log("No auth token yet. Waiting...");
@@ -125,8 +128,14 @@ export function ChatsProvider({ children }: PropsWithChildren) {
 
             supabase.realtime.setAuth(token);
 
+            const channelName = `user_updates:${myself.id}`;
+            const existingChannel = supabase.getChannels().find((c: any) => c.topic === channelName);
+            if (existingChannel) {
+                await supabase.removeChannel(existingChannel);
+            }
+
             subscription = supabase
-                .channel(`user_updates:${myself.id}`)
+                .channel(channelName)
                 // 1. INSERT: new messages sent TO me
                 .on(
                     'postgres_changes',
@@ -189,6 +198,7 @@ export function ChatsProvider({ children }: PropsWithChildren) {
         setupSubscription();
 
         return () => {
+            isMounted = false;
             if (retryTimeout) clearTimeout(retryTimeout);
             if (subscription) supabase.removeChannel(subscription);
         };

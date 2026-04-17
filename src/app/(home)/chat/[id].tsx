@@ -1,17 +1,21 @@
 import { useGradualAnimation } from '@/components/GradualAnimation';
-import MessageInput from '@/components/MessageInput';
+import MessageInput, { PickedFile } from '@/components/MessageInput';
 import MessageList from '@/components/MessageList';
 import { useChats } from '@/hooks/useChats';
 import { signal } from '@/native/signal';
+import { useCall } from '@/providers/CallProvider';
 import { useSupabase } from '@/providers/SupabaseProvider';
 import { channelListStore } from '@/store/channelListStore';
-import { chatStore, LocalMessage } from '@/store/chatStore';
+import { chatStore, LocalMessage, MessageType } from '@/store/chatStore';
+import { userStore } from '@/store/userStore';
 import { useUser } from '@clerk/clerk-expo';
+import { Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
 import { decode } from 'base64-arraybuffer';
-import { Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { Image } from 'expo-image';
+import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, AppState, FlatList, Text, View } from 'react-native';
+import { ActivityIndicator, AppState, FlatList, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 type ChatScreenParams = {
   id: string;
@@ -21,31 +25,55 @@ type ChatScreenParams = {
   created_at?: string,
   messageId?: string,
 }
+
+// ── Helpers ───
+function inferMessageType(mimeType?: string): MessageType {
+  if (!mimeType) return 'document';
+  if (mimeType.startsWith('audio/')) return 'audio';
+  if (mimeType.startsWith('video/')) return 'video';
+  if (mimeType.startsWith('image/')) return 'image';
+  return 'document';
+}
+
+function getExtension(name: string): string {
+  return name.split('.').pop()?.toLowerCase() || '';
+}
+
 export default function ChatScreen() {
   const { id: channelId, name, message: noteMessage, senderId: noteSenderId, created_at: noteCreatedAt, messageId: noteMessageId } = useLocalSearchParams<ChatScreenParams>();
   const { height } = useGradualAnimation();
   const [inputHeight, setInputHeight] = useState(56);
+  const router = useRouter();
 
   const listRef = useRef<FlatList>(null); // for scrolling to bottom
   const insets = useSafeAreaInsets();
   const bottomInset = insets.bottom;
   const { supabase, isSupabaseReady } = useSupabase();
   const { user: myself } = useUser();
-  const { addMessageListener, addStatusListener, loadLocalData: refreshGlobalChats } = useChats();
+  const { addMessageListener, addStatusListener, loadLocalData: refreshGlobalChats, chats } = useChats();
+  const { startCall } = useCall();
   const [messages, setMessages] = useState<LocalMessage[]>();
 
 
   // Channels
+  const localChannel = chats.find(c => c.id === channelId);
   const { data: channel, error, isPending } = useQuery({
     queryKey: ['channels', channelId],
     queryFn: async () => {
       const { data } = await supabase.from('channels').select('*, users(*)').eq('id', channelId).throwOnError().single();
+      if (data?.users) {
+        // Cache user details locally when fetched from server
+        for (const u of data.users) {
+          await userStore.saveUser(u);
+        }
+      }
       return data;
     },
     enabled: isSupabaseReady,
+    initialData: localChannel as any // Fallback to local channel preventing 2s isPending
   });
 
-  const recipientUser = channel?.users?.find(user => user.id !== myself?.id);
+  const recipientUser = channel?.users?.find((user: any) => user.id !== myself?.id);
   const recipientUserId = recipientUser?.id;
 
   const processIncomingMessage = useCallback(async (msg: any) => {
@@ -60,11 +88,37 @@ export default function ChatScreen() {
 
       let finalText = decryptedPayload;
       let securePayload = undefined;
+      let messageType: MessageType = 'text';
+      let fileName: string | undefined;
 
-      // check if the text is secret payload (JSON)
-      if (decryptedPayload.startsWith('{') && decryptedPayload.includes('"type":"image"')) {
-        finalText = "📷 Photo";
-        securePayload = decryptedPayload;
+      // check if the text is a secure payload (JSON)
+      if (decryptedPayload.startsWith('{')) {
+        try {
+          const parsed = JSON.parse(decryptedPayload);
+          if (parsed.type === 'image') {
+            finalText = "📷 Photo";
+            securePayload = decryptedPayload;
+            messageType = 'image';
+          } else if (parsed.type === 'audio') {
+            finalText = "🎵 Audio";
+            securePayload = decryptedPayload;
+            messageType = 'audio';
+            fileName = parsed.fileName;
+          } else if (parsed.type === 'video') {
+            finalText = "🎬 Video";
+            securePayload = decryptedPayload;
+            messageType = 'video';
+            fileName = parsed.fileName;
+          } else if (parsed.type === 'document') {
+            finalText = `📄 ${parsed.fileName || 'Document'}`;
+            securePayload = decryptedPayload;
+            messageType = 'document';
+            fileName = parsed.fileName;
+          }
+        } catch {
+          // Not JSON, treat as plain text
+          console.log("It's a plain text");
+        }
       }
 
       // local logic
@@ -77,7 +131,9 @@ export default function ChatScreen() {
         createdAt: msg.created_at,
         isMe: false, // It's incoming
         status: 'read',
-        securePayload: securePayload
+        securePayload: securePayload,
+        messageType: messageType,
+        fileName: fileName,
       };
 
       // Save to disk
@@ -85,20 +141,15 @@ export default function ChatScreen() {
       setMessages(await chatStore.addMessage(channelId, newMsg))
 
       // update channel preview
-      await channelListStore.updateChannelPreview(supabase, channelId, { content: newMsg.text, createdAt: newMsg.createdAt, isRead: true })
+      await channelListStore.updateChannelPreview(supabase, channelId, { content: newMsg.text, createdAt: newMsg.createdAt, isRead: true, isMe: false })
 
       // update supabase message status
       await supabase
         .from('message_recipients')
-        .update({ status: 'read' })
+        .update({ status: 'read', channel_id: channelId, sender_id: senderId })
         .eq('recipient_user_id', myself?.id!)
         .eq('message_id', msg.id)
         .throwOnError();
-
-      // tell the sender immediately that we read it
-      const channel = supabase.channel(`user_updates:${senderId}`);
-      await channel.httpSend('status_update', { message_id: msg.id, status: 'read', channel_id: channelId });
-      supabase.removeChannel(channel);
 
       return newMsg;
     } catch (e) {
@@ -111,6 +162,11 @@ export default function ChatScreen() {
     if (!myself?.id) return;
     // A. Show local data instantly ⚡
     let local = await chatStore.loadMessages(channelId);
+    setMessages(local); // Fix white screen by showing available local messages immediately
+
+    // Mark channel preview as read so unread badge clears
+    await channelListStore.updateChannelPreview(supabase, channelId, { isRead: true } as any);
+    refreshGlobalChats(); // Notify index.tsx of the change
 
     // Any incoming messages currently in local store still marked as delivered need to be read
     const unreadLocal = local.filter(m => !m.isMe && m.status !== 'read');
@@ -124,7 +180,7 @@ export default function ChatScreen() {
 
       for (const msg of unreadLocal) {
         await supabase.from('message_recipients')
-          .update({ status: 'read' })
+          .update({ status: 'read', channel_id: channelId, sender_id: msg.senderId })
           .eq('message_id', msg.id)
           .eq('recipient_user_id', myself.id);
       }
@@ -169,7 +225,7 @@ export default function ChatScreen() {
         }
         setMessages(await chatStore.addMessage(channelId, msg));
 
-        await channelListStore.updateChannelPreview(supabase, channelId, { content: noteMessage!, createdAt: noteCreatedAt, isRead: true });
+        await channelListStore.updateChannelPreview(supabase, channelId, { content: noteMessage!, createdAt: noteCreatedAt, isRead: true, isMe: true });
         refreshGlobalChats(); // Update Index page
       }
     }
@@ -191,7 +247,7 @@ export default function ChatScreen() {
 
         // Mark as read since user is viewing this chat
         await supabase.from('message_recipients')
-          .update({ status: 'read' })
+          .update({ status: 'read', channel_id: channelId, sender_id: newMessage.senderId })
           .eq('message_id', newMessage.id)
           .eq('recipient_user_id', myself.id);
       });
@@ -230,20 +286,27 @@ export default function ChatScreen() {
     });
     return () => subscription.remove();
   }, [channelId]);
-  const handleSendMessage = async (text: string, images: string[]) => {
+
+  const handleSendMessage = async (text: string, images: string[], files: PickedFile[]) => {
 
     // scroll to end
-
     listRef.current?.scrollToOffset({ offset: 0, animated: true });
 
     const prom = []
+
+    // Send images
     if (images.length > 0) {
-      // Send them sequentially (or Promise.all if you prefer)
-
       for (const uri of images) {
-        prom.push(sendSingleMessage(uri, 'image')); // Call the single image sender helper
+        prom.push(sendSingleMessage(uri, 'image'));
       }
+    }
 
+    // Send files (audio / documents)
+    if (files.length > 0) {
+      for (const file of files) {
+        const type = inferMessageType(file.mimeType);
+        prom.push(sendSingleMessage(file.uri, type, file.name));
+      }
     }
 
     if (text.trim()) {
@@ -253,20 +316,30 @@ export default function ChatScreen() {
 
   };
 
-  const sendSingleMessage = async (content: string, type: 'text' | 'image') => {
+  const sendSingleMessage = async (content: string, type: MessageType, fileName?: string) => {
     if (!recipientUserId) return;
 
-    // show it user first before uploading to server
-    const tempId = Date.now().toString();
+    const isFile = type !== 'text';
+    const displayText = type === 'image' ? "📷 Photo"
+      : type === 'video' ? "🎬 Video"
+        : type === 'audio' ? "🎵 Audio"
+          : type === 'document' ? `📄 ${fileName || 'Document'}`
+            : content;
+
+    // show it to user first before uploading to server
+    const tempId = Date.now().toString() + '_' + Math.random().toString(36).slice(2, 6);
     const optimisticMsg: LocalMessage = {
       id: tempId,
-      text: type === 'image' ? "📷 Photo" : content,
-      imageUri: type === 'image' ? content : null, // SHOW THIS INSTANTLY
+      text: displayText,
+      imageUri: type === 'image' ? content : null,
       senderId: myself?.id!,
       senderName: recipientUser?.first_name ?? "",
       createdAt: new Date().toISOString(),
       isMe: true,
-      status: 'sending' // Shows clock icon 🕒
+      status: 'sending', // Shows clock icon 🕒
+      messageType: type,
+      fileName: fileName,
+      fileUri: isFile ? content : undefined,
     };
 
     const updated = await chatStore.addMessage(channelId, optimisticMsg);
@@ -275,29 +348,33 @@ export default function ChatScreen() {
     // backend logic
     try {
       let finalCipherText = "";
-      // Text vs image
-      if (type === 'image') {
+
+      if (isFile) {
         // encrypt file first
-        const { ciphertext: imgCipher, key, iv } = await signal.encryptImage(content);
+        const { ciphertext: fileCipher, key, iv } = await signal.encryptAttachment(content);
 
         // Upload Blob to supabase bucket
-        const fileName = `${myself?.id}/${Date.now()}.enc`; // filename of the image
+        const ext = getExtension(fileName || content);
+        const bucketFileName = `${myself?.id}/${Date.now()}.enc`;
         const { data: uploadData, error: bucketError } = await supabase.storage
-          .from('chat-media').upload(fileName, decode(imgCipher), { contentType: 'application/octet-stream' });
+          .from('chat-media').upload(bucketFileName, decode(fileCipher), { contentType: 'application/octet-stream' });
 
         if (bucketError) throw bucketError;
 
-        // Create payload
+        // Create payload with file metadata
         const jsonPayload = JSON.stringify({
-          type: 'image',
+          type: type,
           path: uploadData.path,
           key,
-          iv
-        })
+          iv,
+          fileName: fileName || `file.${ext}`,
+          extension: ext,
+        });
 
         // encrypt payload
         finalCipherText = await signal.encrypt(recipientUserId, jsonPayload);
-      } else { // it is a text
+      } else {
+        // it is a text
         finalCipherText = await signal.encrypt(recipientUserId, content);
       }
 
@@ -331,12 +408,31 @@ export default function ChatScreen() {
       setMessages(await chatStore.updateMessage(channelId, tempId, finalMsg));
 
       // update channel preview
-      await channelListStore.updateChannelPreview(supabase, channelId, { content: finalMsg.text, createdAt: finalMsg.createdAt, isRead: true })
+      await channelListStore.updateChannelPreview(supabase, channelId, { content: finalMsg.text, createdAt: finalMsg.createdAt, isRead: true, isMe: true })
       refreshGlobalChats();
     } catch (err) {
       console.error("Send failed:", err);
     }
   }
+  // Try to use fresher cached user details for the header
+  const targetUser = recipientUser ? recipientUser : null;
+  const [liveTargetUser, setLiveTargetUser] = useState<any>(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      async function syncUser() {
+        if (recipientUserId) {
+          const u = await userStore.getUser(recipientUserId);
+          if (u) setLiveTargetUser(u);
+        }
+      }
+      syncUser();
+    }, [recipientUserId])
+  );
+
+  const finalTargetUser = liveTargetUser || targetUser;
+  const headerTitle = finalTargetUser?.full_name || finalTargetUser?.first_name || name;
+
   if (isPending) {
     return <ActivityIndicator />;
   }
@@ -350,7 +446,49 @@ export default function ChatScreen() {
   }
   return (
     <>
-      <Stack.Screen options={{ title: name }} />
+      <Stack.Screen options={{
+        headerTitle: "",
+        headerLeft: () => (
+          <View className="flex-row items-center gap-2">
+            <TouchableOpacity onPress={() => router.back()} className="mr-2">
+              <Ionicons name="arrow-back" size={24} color="black" />
+            </TouchableOpacity>
+            <View className="flex-row items-center gap-3">
+              {finalTargetUser?.avatar_url ? (
+                <Image source={finalTargetUser.avatar_url} style={{ width: 38, height: 38, borderRadius: 19 }} transition={200} />
+              ) : (
+                <View className="w-[38px] h-[38px] rounded-full bg-slate-200 items-center justify-center">
+                  <MaterialIcons name="person" size={24} color="#94a3b8" />
+                </View>
+              )}
+              <Text className="text-lg font-bold text-slate-800">{headerTitle}</Text>
+            </View>
+          </View>
+        ),
+        headerRight: () => (
+          <TouchableOpacity
+            onPress={() => {
+              if (recipientUserId && headerTitle) {
+                startCall(
+                  channelId,
+                  recipientUserId,
+                  headerTitle,
+                  finalTargetUser?.avatar_url || null
+                );
+              }
+            }}
+            style={{
+              padding: 8,
+              marginRight: 4,
+              backgroundColor: 'rgba(14, 152, 100, 0.1)',
+              borderRadius: 20,
+            }}
+            activeOpacity={0.6}
+          >
+            <Ionicons name="call" size={22} color="#0e9864" />
+          </TouchableOpacity>
+        ),
+      }} />
       <SafeAreaView style={{ flex: 1 }} edges={['bottom']}>
         <MessageList inputHeight={inputHeight}
           listRef={listRef}

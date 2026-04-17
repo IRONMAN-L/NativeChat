@@ -1,4 +1,5 @@
 import { useSupabase } from '@/providers/SupabaseProvider';
+import { userStore } from '@/store/userStore';
 import { User } from '@/types/index';
 import { useUser } from '@clerk/clerk-expo';
 import { useQuery } from '@tanstack/react-query';
@@ -17,10 +18,13 @@ export default function UserList({ onPress }: UserListProps) {
     queryKey: ['users'],
     queryFn: async () => {
       const { data: users } = await supabase.from('users').select('*').neq('id', user!.id).throwOnError();
-
+      if (users) {
+        await userStore.saveUsers(users); // store it locally
+      }
       return users;
     },
     enabled: isSupabaseReady,
+    initialData: (() => userStore.loadUsers()) as any,
   });
 
   if (isLoading) {

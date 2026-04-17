@@ -2,7 +2,7 @@ import { ChannelWithUsers } from "@/types";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { SupabaseClient } from "@supabase/supabase-js";
 export type LocalChannel = ChannelWithUsers & {
-    lastMessage?: { content: string; createdAt: string; isRead: boolean; }
+    lastMessage?: { content: string; createdAt: string; isRead: boolean; isMe?: boolean; unreadCount?: number; }
 }
 
 const storageKey = 'channels';
@@ -42,14 +42,32 @@ export const channelListStore = {
     },
 
     // NEW: Helper to update just the preview from a new message
-    async updateChannelPreview(supabase: SupabaseClient, channelId: string, preview: { content: string, createdAt: string, isRead: boolean }): Promise<LocalChannel> {
+    async updateChannelPreview(supabase: SupabaseClient, channelId: string, preview: { content?: string, createdAt?: string, isRead?: boolean, isMe?: boolean }): Promise<LocalChannel> {
         const channels = await this.loadChannels();
         const target = channels.find(ch => ch.id === channelId);
 
         if (target) {
+            let newUnreadCount = target.lastMessage?.unreadCount || 0;
+            
+            if (preview.content) {
+                // new message
+                if (preview.isRead || preview.isMe) {
+                    newUnreadCount = 0;
+                } else {
+                    newUnreadCount += 1;
+                }
+            } else if (preview.isRead) {
+                // mark as read
+                newUnreadCount = 0;
+            }
+
             const updatedChannel = {
                 ...target,
-                lastMessage: preview.content ? preview : { ...target.lastMessage!, isRead: true } // handling mark as read status
+                lastMessage: preview.content 
+                  ? { ...target.lastMessage, ...preview, unreadCount: newUnreadCount } as any
+                  : target.lastMessage 
+                    ? { ...target.lastMessage, isRead: true, unreadCount: 0 } 
+                    : undefined 
             };
             await this.updateChannel(updatedChannel);
             return updatedChannel;
@@ -62,7 +80,7 @@ export const channelListStore = {
 
             const newChannel: LocalChannel = {
                 ...data,
-                lastMessage: preview
+                lastMessage: preview.content ? { ...preview, unreadCount: preview.isMe || preview.isRead ? 0 : 1 } as any : undefined
             }
             await this.addChannel(newChannel);
             return newChannel;

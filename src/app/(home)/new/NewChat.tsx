@@ -4,7 +4,7 @@ import { User } from '@/types';
 import { useUser } from '@clerk/clerk-expo';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { router } from 'expo-router';
-import { View } from 'react-native';
+import { View, ActivityIndicator } from 'react-native';
 // TODO: Check if a direct channel with that clicked user already exists
 export default function NewChat() {
   const { supabase } = useSupabase();
@@ -88,6 +88,11 @@ export default function NewChat() {
   return (
     <View className='bg-white flex-1'>
       <UserList onPress={handleUserPress} />
+      {createChannel.isPending && (
+        <View className="absolute inset-0 bg-white/60 justify-center items-center z-50">
+          <ActivityIndicator size="large" color="#0e9484" />
+        </View>
+      )}
     </View>
   )
 }

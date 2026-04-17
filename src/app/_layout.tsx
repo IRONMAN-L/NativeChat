@@ -11,6 +11,7 @@ import { sendBackgroundTextMessage } from '@/services/chatService';
 import { channelListStore } from '@/store/channelListStore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import { userStore } from '@/store/userStore';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import * as Notifications from 'expo-notifications';
 import * as SecureStore from 'expo-secure-store';
@@ -18,7 +19,6 @@ import { useEffect } from 'react';
 import { ActivityIndicator, AppState, Text, View } from 'react-native';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
 import NativeTaskModule from '../../modules/native-task/src/NativeTaskModule';
-
 // TanStack query
 const queryClient = new QueryClient();
 
@@ -89,7 +89,15 @@ function RootStack() {
                 }
             }
         }
+        async function setMyDetails() {
+            if (!myId || !isSupabaseReady) return;
+            const { data } = await supabase.from('users').select('*').eq('id', myId).single();
+            if (data) {
+                await userStore.saveMyDetails(data);
+            }
+        }
         setupSignal();
+        setMyDetails();
     }, [isSignedIn, myId, isSupabaseReady, supabase]);
 
     useEffect(() => {

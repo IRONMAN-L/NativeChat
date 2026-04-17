@@ -17,7 +17,7 @@ class NativeTaskModule : Module() {
     Name("NativeTask")
 
     // Telling Expo which events we are allowing to send from JS
-    Events("onUserFound", "onConnected", "onMessageReceived", "onDisconnected")
+    Events("onUserFound", "onConnected", "onMessageReceived", "onDisconnected", "onTransferUpdate", "onFileReceived")
 
     // Function called from JS
     // HOST: Creates a room
@@ -53,6 +53,27 @@ class NativeTaskModule : Module() {
       val context = appContext.reactContext ?: return@Function
       val payload = Payload.fromBytes(message.toByteArray(Charsets.UTF_8))
       Nearby.getConnectionsClient(context).sendPayload(endpointId, payload)
+    }
+
+    Function("sendFile") { endpointId: String, fileUriString: String ->
+      val context = appContext.reactContext ?: return@Function
+            
+      try {
+        // React Native gives us URIs (file:// or content://)
+        val uri = android.net.Uri.parse(fileUriString)
+                
+        // We open a safe stream to the file so we don't crash the memory
+        val pfd = context.contentResolver.openFileDescriptor(uri, "r") ?: return@Function
+        val payload = Payload.fromFile(pfd)
+
+        // Track this as a file payload so onTransferUpdate can label it correctly
+        outgoingFilePayloadIds.add(payload.id)
+
+        Nearby.getConnectionsClient(context).sendPayload(endpointId, payload)
+        Log.d("NativeTask", "Started streaming file payload: ${payload.id}")
+      } catch (e: Exception) {
+        Log.e("NativeTask", "Failed to send file: ${e.message}")
+      }
     }
 
     // STOP: Disconnects everything
@@ -107,6 +128,11 @@ class NativeTaskModule : Module() {
             }
           }
 
+  // A map to store incoming file payloads
+  private val incomingFilePayloads = mutableMapOf<Long, Payload>()
+  // A set to track outgoing FILE payload IDs (to distinguish from BYTES payloads)
+  private val outgoingFilePayloadIds = mutableSetOf<Long>()
+
   // Triggers when data flies across the Wi-Fi Direct pipe
   private val payloadCallback =
           object : PayloadCallback() {
@@ -117,15 +143,106 @@ class NativeTaskModule : Module() {
 
                 // Send the message back to JS!
                 sendEvent(
-                        "onMessageReceived",
-                        mapOf("endpointId" to endpointId, "message" to message)
+                  "onMessageReceived",
+                  mapOf(
+                    "endpointId" to endpointId, 
+                    "message" to message, 
+                    "payloadId" to payload.id.toString()
+                  )
                 )
+              } else if (payload.type == Payload.Type.FILE) {
+                Log.d("NativeTask", "Incoming file stream started: ${payload.id}")
+                incomingFilePayloads[payload.id] = payload
               }
             }
             override fun onPayloadTransferUpdate(
-                    endpointId: String,
-                    update: PayloadTransferUpdate
-            ) {}
+              endpointId: String,
+              update: PayloadTransferUpdate
+            ) {
+              // Calculate the percentage
+              val progress = if (update.totalBytes > 0) {
+                (update.bytesTransferred.toFloat() / update.totalBytes.toFloat()) * 100
+              } else {
+                0f
+              }
+
+              // True only for FILE payloads (not BYTES/text messages)
+              val isFile = incomingFilePayloads.containsKey(update.payloadId) ||
+                           outgoingFilePayloadIds.contains(update.payloadId)
+
+              // Send the exact percentage back to React Native
+              sendEvent("onTransferUpdate", mapOf(
+                  "endpointId" to endpointId,
+                  "payloadId" to update.payloadId.toString(),
+                  "status" to update.status, // 1 = SUCCESS, 2 = FAILURE, 3 = IN_PROGRESS
+                  "progress" to progress.toInt(),
+                  "isFile" to isFile  // KEY: lets JS ignore BYTES (text) transfer events
+              ))
+
+              if (update.status == PayloadTransferUpdate.Status.SUCCESS) {
+                Log.d("NativeTask", "Payload ${update.payloadId} transfer 100% complete!")
+                val payload = incomingFilePayloads[update.payloadId]
+                if (payload != null && payload.type == Payload.Type.FILE) {
+                  val payloadFile = payload.asFile()
+                  if (payloadFile != null) {
+                      val reactContext = appContext.reactContext
+                      var finalUri: String? = null
+                      
+                      if (reactContext != null) {
+                          try {
+                              var inputStream: java.io.InputStream? = null
+                              val payloadUri = payloadFile.asUri()
+                              val pfd = payloadFile.asParcelFileDescriptor()
+
+                              if (payloadUri != null) {
+                                  inputStream = reactContext.contentResolver.openInputStream(payloadUri)
+                              } else if (pfd != null) {
+                                  inputStream = android.os.ParcelFileDescriptor.AutoCloseInputStream(pfd)
+                              } else {
+                                  val javaFile = payloadFile.asJavaFile()
+                                  if (javaFile != null) {
+                                      inputStream = java.io.FileInputStream(javaFile)
+                                  }
+                              }
+
+                              if (inputStream != null) {
+                                  val cachedFile = java.io.File(reactContext.cacheDir, "payload_${update.payloadId}.json")
+                                  val outputStream = java.io.FileOutputStream(cachedFile)
+                                  inputStream.copyTo(outputStream)
+                                  inputStream.close()
+                                  outputStream.close()
+                                  finalUri = "file://" + cachedFile.absolutePath
+                              }
+                          } catch (e: Exception) {
+                              Log.e("NativeTask", "Failed to cache payload stream", e)
+                          }
+                      }
+                      
+                      // If stream caching failed, try fallback
+                      if (finalUri == null) {
+                          val javaFile = payloadFile.asJavaFile()
+                          if (javaFile != null) {
+                             finalUri = "file://" + javaFile.absolutePath
+                          }
+                      }
+
+                      if (finalUri != null) {
+                          sendEvent("onFileReceived", mapOf(
+                            "endpointId" to endpointId, 
+                            "fileUri" to finalUri, 
+                            "payloadId" to update.payloadId.toString()
+                          ))
+                      }
+                  }
+                  incomingFilePayloads.remove(update.payloadId)
+                }
+                // Clean up outgoing file tracking
+                outgoingFilePayloadIds.remove(update.payloadId)
+              } else if (update.status == PayloadTransferUpdate.Status.FAILURE || update.status == PayloadTransferUpdate.Status.CANCELED) {
+                incomingFilePayloads.remove(update.payloadId)
+                outgoingFilePayloadIds.remove(update.payloadId)
+              }
+            }
           }
   private fun enqueueWork(url: String, token: String, payload: Map<String, String>) {
     val context =

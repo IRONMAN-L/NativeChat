@@ -1,6 +1,6 @@
 import { signal } from '@/native/signal';
 import { channelListStore } from '@/store/channelListStore';
-import { chatStore, LocalMessage } from '@/store/chatStore';
+import { chatStore, LocalMessage, MessageType } from '@/store/chatStore';
 import { Database } from '@/types/database.types';
 import { SupabaseClient } from '@supabase/supabase-js';
 import * as Notifications from 'expo-notifications';
@@ -75,14 +75,39 @@ export const handleNewMessage = async (
             return;
         }
 
-        // 3. Determine Content (Text vs Image)
+        // 3. Determine Content (Text vs File)
         let displayContent = plaintext;
         let securePayload = undefined;
+        let messageType: MessageType = 'text';
+        let fileName: string | undefined;
 
-        // Check if it's the hidden JSON for an image
-        if (plaintext.startsWith('{') && plaintext.includes('"type":"image"')) {
-            displayContent = "📷 Photo";
-            securePayload = plaintext; // Save keys for later download
+        // Check if it's an encrypted file payload (JSON with type field)
+        if (plaintext.startsWith('{')) {
+            try {
+                const parsed = JSON.parse(plaintext);
+                if (parsed.type === 'image') {
+                    displayContent = "📷 Photo";
+                    securePayload = plaintext;
+                    messageType = 'image';
+                } else if (parsed.type === 'audio') {
+                    displayContent = "🎵 Audio";
+                    securePayload = plaintext;
+                    messageType = 'audio';
+                    fileName = parsed.fileName;
+                } else if (parsed.type === 'video') {
+                    displayContent = "🎬 Video";
+                    securePayload = plaintext;
+                    messageType = 'video';
+                    fileName = parsed.fileName;
+                } else if (parsed.type === 'document') {
+                    displayContent = `📄 ${parsed.fileName || 'Document'}`;
+                    securePayload = plaintext;
+                    messageType = 'document';
+                    fileName = parsed.fileName;
+                }
+            } catch {
+                // Not valid JSON, treat as plain text
+            }
         }
 
 
@@ -92,7 +117,8 @@ export const handleNewMessage = async (
         const receivedChannel = await channelListStore.updateChannelPreview(supabase, meta.channel_id!, {
             content: displayContent,
             createdAt: meta.created_at,
-            isRead: false // It's new!
+            isRead: false, // It's new!
+            isMe: false, // Explicitly not me so it unreadCount increments
         });
 
         let senderDetails;
@@ -109,7 +135,9 @@ export const handleNewMessage = async (
             isMe: false,
             status: 'delivered', // It reached us
             imageUri: null,      // We haven't downloaded the file yet
-            securePayload: securePayload, // Store keys if it's an image
+            securePayload: securePayload, // Store keys if it's a file
+            messageType: messageType,
+            fileName: fileName,
         };
 
         await chatStore.addMessage(meta.channel_id!, newMessage);
@@ -129,7 +157,7 @@ export const handleNewMessage = async (
             });
         }
 
-        await supabase.from('message_recipients').update({ status: 'delivered' }).eq('message_id', messageId).eq('recipient_user_id', newRow.recipient_user_id);
+        await supabase.from('message_recipients').update({ status: 'delivered', channel_id: meta.channel_id, sender_id: meta.user_id }).eq('message_id', messageId).eq('recipient_user_id', newRow.recipient_user_id);
         console.log("Message Decrypted, Stored & Notified!");
         return { message: newMessage, channelId: meta.channel_id! };
 

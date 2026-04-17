@@ -1,6 +1,8 @@
 import { AsyncMutex } from '@/utils/AsyncMutex';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+export type MessageType = 'text' | 'image' | 'video' | 'audio' | 'document';
+
 export type LocalMessage = {
     id: string; // UUID
     text: string;
@@ -11,6 +13,9 @@ export type LocalMessage = {
     createdAt: string;
     isMe: boolean;
     status: 'sending' | 'sent' | 'delivered' | 'read';
+    messageType?: MessageType;   // defaults to 'text' for backward compat
+    fileName?: string;           // original file name for docs/audio
+    fileUri?: string;            // local decrypted file path
 };
 
 const getStorageKey = (channelId: string) => `chat_messages_${channelId}`;
