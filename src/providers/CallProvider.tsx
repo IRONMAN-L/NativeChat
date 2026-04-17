@@ -174,7 +174,7 @@ export function CallProvider({ children }: PropsWithChildren) {
     const acceptIncomingCall = useCallback(async () => {
         if (!incomingCall) return;
 
-        const me = await userStore.getMyDetails();
+        await userStore.getMyDetails();
 
         // Track active call
         activeCallRef.current = {

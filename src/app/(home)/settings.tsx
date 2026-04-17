@@ -1,10 +1,9 @@
 import { useAuth } from '@clerk/clerk-expo';
 import { Text, View, Alert, TouchableOpacity, TextInput, ActivityIndicator, ScrollView } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter , useFocusEffect } from 'expo-router';
 import { Ionicons, Feather, MaterialIcons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useState, useCallback } from 'react';
-import { useFocusEffect } from 'expo-router';
 import { userStore } from '@/store/userStore';
 import { User } from '@/types';
 import * as ImagePicker from 'expo-image-picker';

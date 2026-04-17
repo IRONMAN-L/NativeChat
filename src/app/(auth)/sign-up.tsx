@@ -1,7 +1,7 @@
 import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, Alert } from 'react-native'
 import { useState } from 'react'
-import { Link, router } from 'expo-router';
-import { MaterialIcons, MaterialCommunityIcons, Feather } from '@expo/vector-icons';
+import { Link } from 'expo-router';
+import { MaterialCommunityIcons, Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSignUp } from '@clerk/clerk-expo';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
@@ -81,7 +81,7 @@ export default function SignUp() {
             Verify Email
           </Text>
           <Text className="text-slate-500 text-center mb-8">
-            We've sent a verification code to your email. Please enter it below.
+            We{"'"}ve sent a verification code to your email. Please enter it below.
           </Text>
           
           <View className="w-full mb-6 relative">

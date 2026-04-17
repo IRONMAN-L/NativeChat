@@ -1,14 +1,14 @@
 import { LocalChannel } from '@/store/channelListStore';
 import { useUser } from '@clerk/clerk-expo';
 import { formatDistanceToNow } from 'date-fns';
-import { router } from 'expo-router';
+import { router , useFocusEffect } from 'expo-router';
 import { Image, Text, TouchableOpacity, View } from 'react-native';
 
 
 import { userStore } from '@/store/userStore';
 import { User as UserType } from '@/types/index';
 import { useCallback, useState } from 'react';
-import { useFocusEffect } from 'expo-router';
+
 
 type ChannelListItemProps = {
   channel: LocalChannel

@@ -578,7 +578,7 @@ export default function NearbyChatScreen() {
         <View className="flex-row items-center gap-2 bg-slate-800 px-4 py-2.5 border-b border-slate-700/50">
           <MaterialCommunityIcons name="information-outline" size={16} color="#38bdf8" />
           <Text className="text-slate-400 text-[12px] flex-1 leading-4">
-            This is a temporary chat. Messages won't be saved after you leave.
+            This is a temporary chat. Messages {"won't"} be saved after you leave.
           </Text>
         </View>
 
