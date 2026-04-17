@@ -9,6 +9,8 @@ export type NativeTaskModuleEvents = {
   onConnected: (event: { endpointId: string }) => void;
   onMessageReceived: (event: { endpointId: string; message: string }) => void;
   onDisconnected: (event: { endpointId: string }) => void;
+  onTransferUpdate: (event: { endpointId: string; payloadId: string; status: string; progress: string; isFile: boolean }) => void;
+  onFileReceived: (event: { endpointId: string; fileUri: string; payloadId: string }) => void;
   onChange: (params: ChangeEventPayload) => void;
 };
 

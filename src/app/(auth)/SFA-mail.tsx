@@ -1,21 +1,28 @@
 import { useSignIn } from '@clerk/clerk-expo';
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Text, TextInput, TouchableOpacity, View } from 'react-native';
 export default function VerifyMail() {
   const [code, setCode] = useState<string>('');
   const { signIn, isLoaded, setActive } = useSignIn();
-
+  const [buttonClicked, setButtonClicked] = useState<boolean>(false);
   const onVerifyPress = async () => {
     if (!isLoaded) return;
-    const result = await signIn.attemptSecondFactor({
-      strategy: 'email_code',
-      code,
-    });
+    setButtonClicked(true);
+    try {
+      const result = await signIn.attemptSecondFactor({
+        strategy: 'email_code',
+        code,
+      });
 
-    if (result?.status === 'complete') {
-      await setActive({ session: result.createdSessionId })
-      router.replace('/');
+      if (result?.status === 'complete') {
+        setButtonClicked(false);
+        await setActive({ session: result.createdSessionId })
+        router.replace('/');
+      }
+    } catch {
+      Alert.alert("Incorrect code", "Please enter correct code");
+      setButtonClicked(false);
     }
   }
 
@@ -34,10 +41,11 @@ export default function VerifyMail() {
       />
       <TouchableOpacity
         onPress={onVerifyPress}
+        disabled={buttonClicked || !isLoaded || code.length === 0}
         activeOpacity={0.8}
         className="w-full bg-[#0e9484] p-4 rounded-full items-center shadow-sm"
       >
-        {isLoaded ? <Text className="text-white font-bold text-lg">Verify</Text> : <ActivityIndicator color="white" className="mr-2" />}
+        {buttonClicked ? <ActivityIndicator color="white" className="mr-2" /> : <Text className="text-white font-bold text-lg">Verify</Text>}
       </TouchableOpacity>
     </View>
   )

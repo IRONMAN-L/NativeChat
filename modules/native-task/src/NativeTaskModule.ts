@@ -16,6 +16,7 @@ declare class NativeTaskModule extends NativeModule<NativeTaskModuleEvents> {
   startDiscovery(): void;
   connectToUser(endpointId: string, myName: string): void;
   sendMessage(endpointId: string, message: string): void;
+  sendFile(endpointId: string, fileUriString: string): void;
   stopAll(): void;
 }
 

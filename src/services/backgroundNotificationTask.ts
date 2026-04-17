@@ -23,7 +23,7 @@ TaskManager.defineTask(BACKGROUND_NOTIFICATION_TASK, async ({ data, error, execu
                 console.log("📬 App is in foreground, emitting push event for React tree...");
                 DeviceEventEmitter.emit(FOREGROUND_PUSH_EVENT, rawData);
             }
-        } catch (e) {
+        } catch {
             // parse failed — ignore
         }
         return;

@@ -1,12 +1,13 @@
 import { useKeyboardLayoutStore } from '@/store/useKeyboardLayoutStore';
 import { useSignIn } from '@clerk/clerk-expo';
-import { MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
+import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Link, useRouter } from 'expo-router';
 import { useState } from 'react';
 import { ActivityIndicator, Alert, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import TypeWriter from '../../components/TypeWriter';
+
 export default function SignIn() {
   const [emailAddress, setEmailAddress] = useState<string>('');
   const [password, setPassword] = useState<string>('');
@@ -14,14 +15,12 @@ export default function SignIn() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { isLoaded, signIn, setActive } = useSignIn();
-
-
-  // layout key to force re-render on keyboard layout change
+  const [buttonClicked, setButtonClicked] = useState<boolean>(false);
   const lastResumeAt = useKeyboardLayoutStore((state) => state.lastResumeAt);
+
   const onSignInPress = async () => {
     if (!isLoaded) return;
-    console.log("Sign In pressed", emailAddress, password);
-
+    setButtonClicked(true);
     try {
       const signInAttempt = await signIn.create({
         identifier: emailAddress,
@@ -30,119 +29,121 @@ export default function SignIn() {
 
       if (signInAttempt.status === 'complete') {
         await setActive({ session: signInAttempt.createdSessionId })
+        setButtonClicked(false);
         router.replace('/');
       } else if (signInAttempt.status === 'needs_second_factor') {
-        await signIn.prepareSecondFactor({
-          strategy: 'email_code'
-        });
+        await signIn.prepareSecondFactor({ strategy: 'email_code' });
+        setButtonClicked(false);
         router.push('/SFA-mail');
-      } else {
-        console.log(JSON.stringify(signInAttempt, null, 2));
       }
-
-
     } catch (err: any) {
-      console.log(JSON.stringify(err, null, 2));
       if (err.errors && err.errors[0].code === 'form_password_incorrect') {
         Alert.alert("Error", "Invalid credentials.");
-      }
-      else {
+      } else {
         Alert.alert("Error", (err as Error).message);
       }
+      setButtonClicked(false);
     }
   }
 
-
   return (
-    <View className="flex-1 bg-white" style={{ paddingTop: insets.top }}>
-
+    <View className="flex-1 bg-[#f8fafc]" style={{ paddingTop: insets.top }}>
       <KeyboardAwareScrollView
         key={lastResumeAt}
         enableOnAndroid={true}
         keyboardShouldPersistTaps="handled"
-        extraScrollHeight={9}
+        extraScrollHeight={20}
         className='flex-1'
         contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }}
         showsVerticalScrollIndicator={false}
       >
-        <View className="px-8 w-full items-center gap-8">
-          {/* Header Section*/}
-          <View className="items-center gap-2">
-            <View className='flex-row items-center'>
-              <MaterialCommunityIcons name="nativescript" size={60} color="#0e9484" />
+        <View className="px-8 w-full items-center gap-10">
+
+          {/* Header Section */}
+          <View className="items-center gap-3 mt-10">
+            <View className='flex-row items-center bg-white p-4 rounded-3xl shadow-sm border border-slate-100'>
+              <MaterialCommunityIcons name="nativescript" size={48} color="#0e9484" />
               <TypeWriter
                 text="ativeChat"
                 speed={100}
-                textClass="text-4xl font-bold text-[#0e9484]"
-                cursorClass="bg-[#2563eb]"
+                textClass="text-3xl font-extrabold text-slate-800 tracking-tight"
+                cursorClass="bg-[#0e9484]"
               />
             </View>
-            <Text className="text-3xl font-bold text-[#0e9484]">
-              Welcome Back!
+            <Text className="text-3xl font-bold text-slate-800 mt-4">
+              Welcome Back
             </Text>
-            <Text className="text-gray-500 text-center px-4">
-              Enter your details to connect with friends today.
+            <Text className="text-slate-500 text-center px-6 leading-6 text-base">
+              Sign in to continue connecting with your friends seamlessly.
             </Text>
           </View>
 
           {/* Form Section */}
-          <View className="w-full gap-4">
-
-            {/* EmailAddress Input */}
+          <View className="w-full gap-5">
             <View>
-              <Text className="text-gray-700 font-medium mb-1 ml-1">Email Address</Text>
-              <TextInput
-                value={emailAddress}
-                onChangeText={setEmailAddress}
-                placeholder="hello@example.com"
-                placeholderTextColor="#9ca3af" // Gray-400
-                autoCapitalize="none"
-                keyboardType="email-address"
-                className="w-full bg-gray-100 border border-gray-200 rounded-2xl p-4 text-gray-800 text-base focus:border-[#0e9484]"
-              />
+              <Text className="text-slate-700 font-semibold mb-2 ml-1 text-sm">Email Address</Text>
+              <View className="flex-row items-center w-full bg-white border border-slate-200 rounded-[20px] px-4 h-[60px] focus:border-[#0e9484] shadow-sm">
+                <Feather name="mail" size={20} color="#94a3b8" className="mr-3" />
+                <TextInput
+                  value={emailAddress}
+                  onChangeText={setEmailAddress}
+                  placeholder="hello@example.com"
+                  placeholderTextColor="#94a3b8"
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                  className="flex-1 text-slate-800 text-base h-full"
+                />
+              </View>
             </View>
 
-            {/* Password Input */}
             <View>
-              <Text className="text-gray-700 font-medium mb-1 ml-1">Password</Text>
-              <View className="flex-row items-center w-full bg-gray-100 border border-gray-200 rounded-2xl px-4 h-14 focus:border-[#0e9484]">
+              <Text className="text-slate-700 font-semibold mb-2 ml-1 text-sm">Password</Text>
+              <View className="flex-row items-center w-full bg-white border border-slate-200 rounded-[20px] px-4 h-[60px] focus:border-[#0e9484] shadow-sm">
+                <Feather name="lock" size={20} color="#94a3b8" className="mr-3" />
                 <TextInput
                   value={password}
                   onChangeText={setPassword}
                   placeholder="Enter your password"
-                  placeholderTextColor="#9ca3af"
-                  passwordRules="required: upper; required: lower; required: digit; required: special; minlength: 8;"
+                  placeholderTextColor="#94a3b8"
                   secureTextEntry={!showPassword}
-                  className="flex-1 text-gray-800 text-base h-full"
+                  className="flex-1 text-slate-800 text-base h-full"
                 />
-                <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
-                  <MaterialIcons name={showPassword ? "visibility" : "visibility-off"} size={24} color="gray" />
+                <TouchableOpacity onPress={() => setShowPassword(!showPassword)} className="pl-2">
+                  <Feather name={showPassword ? "eye" : "eye-off"} size={20} color="#94a3b8" />
                 </TouchableOpacity>
               </View>
             </View>
+
+            <TouchableOpacity className="items-end mt-[-8px]">
+              <Text className="text-[#0e9484] font-medium text-sm">Forgot password?</Text>
+            </TouchableOpacity>
           </View>
 
           {/* Button Section */}
-          <View className="w-full gap-4 mt-4">
+          <View className="w-full gap-6 mt-2 mb-10">
             <TouchableOpacity
+              disabled={buttonClicked}
               onPress={onSignInPress}
               activeOpacity={0.8}
-              className="w-full bg-[#0e9484] p-4 rounded-full items-center shadow-sm"
+              className={buttonClicked ? "w-full bg-[#0e9484]/50 h-[60px] rounded-[20px] items-center justify-center shadow-lg shadow-[#0e9484]/30" : "w-full bg-[#0e9484] h-[60px] rounded-[20px] items-center justify-center shadow-lg shadow-[#0e9484]/30"}
             >
-              {isLoaded ? <Text className="text-white font-bold text-lg">Sign In</Text> : <ActivityIndicator color="white" className="mr-2" />}
-
+              {buttonClicked ? (
+                <ActivityIndicator color="white" />
+              ) : (
+                <Text className="text-white font-bold text-lg tracking-wide">Sign In</Text>
+              )}
             </TouchableOpacity>
 
-            {/* Footer / Login Link */}
-            <View className="flex-row justify-center items-center gap-1">
-              <Text className="text-gray-500">Don&apos;t have an account?</Text>
+            <View className="flex-row justify-center items-center gap-2">
+              <Text className="text-slate-500 text-base">Don&apos;t have an account?</Text>
               <Link href="/sign-up" asChild>
                 <TouchableOpacity>
-                  <Text className="text-[#0e9484] font-bold">Sign Up</Text>
+                  <Text className="text-[#0e9484] font-bold text-base">Sign Up</Text>
                 </TouchableOpacity>
               </Link>
             </View>
           </View>
+
         </View>
       </KeyboardAwareScrollView>
     </View>

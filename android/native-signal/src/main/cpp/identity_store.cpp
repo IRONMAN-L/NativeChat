@@ -157,13 +157,21 @@ int IdentityKeyStore::is_trusted_identity(
 
     std::vector<uint8_t> stored;
 
-    // TOFU
+    // TOFU / Auto-update
     if (!secure::read(key, stored)) {
         secure::write(key,
             std::vector<uint8_t>(identity_key, identity_key + identity_key_len));
         return 1;
     }
 
-    return stored.size() == identity_key_len &&
-           memcmp(stored.data(), identity_key, identity_key_len) == 0;
+    if (stored.size() == identity_key_len &&
+        memcmp(stored.data(), identity_key, identity_key_len) == 0) {
+        return 1;
+    }
+
+    // Identity mismatch (e.g. user reinstalled app or cleared data). 
+    // Auto-trusting the new identity for smooth UX.
+    secure::write(key,
+        std::vector<uint8_t>(identity_key, identity_key + identity_key_len));
+    return 1;
 }

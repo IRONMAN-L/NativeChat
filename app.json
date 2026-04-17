@@ -35,7 +35,9 @@
         "android.permission.BLUETOOTH_ADVERTISE",
         "android.permission.BLUETOOTH_CONNECT",
         "android.permission.BLUETOOTH_SCAN",
-        "android.permission.NEARBY_WIFI_DEVICES"
+        "android.permission.NEARBY_WIFI_DEVICES",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.CAMERA"
       ]
     },
     "web": {
